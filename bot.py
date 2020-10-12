@@ -14,9 +14,10 @@ Press Ctrl-C on the command line to stop the bot.
 """
 from dotenv import load_dotenv
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Updater, CommandHandler, CallbackQueryHandler, ConversationHandler
+from telegram.ext import CallbackQueryHandler, ConversationHandler, CommandHandler, Filters, MessageHandler, Updater
 import logging
 import os
+import youtube_dl 
 
 # load environment variables
 load_dotenv(dotenv_path='./bot.env')
@@ -30,32 +31,42 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
+# TODO code cleanup!
+
 # Stages
 FIRST, SECOND = range(2)
 # Callback data
 ONE, TWO, THREE, FOUR = range(4)
 
+global url
 
 def start(update, context):
     """Send message on `/start`."""
+
+
     # Get user that sent /start and log his name
     user = update.message.from_user
-    logger.info("User %s started the conversation.", user.first_name)
+
+    # update global URL object
+    global url
+    url = update.message.text
+    logger.info("User %s started the conversation with '%s'.", user.first_name, url)
     # Build InlineKeyboard where each button has a displayed text
     # and a string as callback_data
     # The keyboard is a list of button rows, where each row is in turn
     # a list (hence `[[...]]`).
     keyboard = [
         [
-            InlineKeyboardButton("1", callback_data=str(ONE)),
-            InlineKeyboardButton("2", callback_data=str(TWO)),
+            InlineKeyboardButton("Download", callback_data=str(TWO)),
+            # InlineKeyboardButton("Abort", callback_data=str(ONE)),
         ]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     # Send message with text and appended InlineKeyboard
-    update.message.reply_text("Start handler, Choose a route", reply_markup=reply_markup)
+    update.message.reply_text("Do you want me to download '%s' ?" % url, reply_markup=reply_markup)
     # Tell ConversationHandler that we're in state `FIRST` now
-    return FIRST
+    # return FIRST
+    return SECOND
 
 
 def start_over(update, context):
@@ -81,23 +92,28 @@ def start_over(update, context):
 
 def one(update, context):
     """Show new choice of buttons"""
+    logger.info("one()")
+
     query = update.callback_query
     query.answer()
     keyboard = [
         [
-            InlineKeyboardButton("3", callback_data=str(THREE)),
-            InlineKeyboardButton("4", callback_data=str(FOUR)),
+            InlineKeyboardButton("Do nothing", callback_data=str(TWO)),
+            # InlineKeyboardButton("Do nothing", callback_data=str(THREE)),
+            # InlineKeyboardButton("4", callback_data=str(FOUR)),
         ]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     query.edit_message_text(
-        text="First CallbackQueryHandler, Choose a route", reply_markup=reply_markup
+        text="To which format shall the audio be converted?", reply_markup=reply_markup
     )
-    return FIRST
+    # return FIRST
+    return SECOND
 
 
 def two(update, context):
     """Show new choice of buttons"""
+    logger.info("two()")
     query = update.callback_query
     query.answer()
     keyboard = [
@@ -115,12 +131,13 @@ def two(update, context):
 
 def three(update, context):
     """Show new choice of buttons"""
+    logger.info("three()")
     query = update.callback_query
     query.answer()
     keyboard = [
         [
-            InlineKeyboardButton("Yes, let's do it again!", callback_data=str(ONE)),
-            InlineKeyboardButton("Nah, I've had enough ...", callback_data=str(TWO)),
+            # InlineKeyboardButton("Yes, let's do it again!", callback_data=str(ONE)),
+            InlineKeyboardButton("Thanks", callback_data=str(TWO)),
         ]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -133,6 +150,7 @@ def three(update, context):
 
 def four(update, context):
     """Show new choice of buttons"""
+    logger.info("four()")
     query = update.callback_query
     query.answer()
     keyboard = [
@@ -152,8 +170,30 @@ def end(update, context):
     """Returns `ConversationHandler.END`, which tells the
     ConversationHandler that the conversation is over"""
     query = update.callback_query
+    query.edit_message_text(text="Downloading..")
+    global url
+    logger.info(url)
+
+    # some default configurations for video downloads
+    extension = 'mp3'
+    ydl_opts = {
+        'format': 'bestaudio/best',
+        'restrictfilenames' : True,
+        'outtmpl': '%(title)s.%(ext)s',
+        'postprocessors': [{
+            'key': 'FFmpegExtractAudio',
+            'preferredcodec': extension,
+            'preferredquality': '192',
+        }],
+    }
+
+    with youtube_dl.YoutubeDL(ydl_opts) as ydl:
+        result = ydl.extract_info("{}".format(url))
+        raw_name = ydl.prepare_filename(result)
+
+    query = update.callback_query
     query.answer()
-    query.edit_message_text(text="See you next time!")
+    query.edit_message_text(text="Done!")
     return ConversationHandler.END
 
 
@@ -171,7 +211,7 @@ def main():
     # $ means "end of line/string"
     # So ^ABC$ will only allow 'ABC'
     conv_handler = ConversationHandler(
-        entry_points=[CommandHandler('start', start)],
+        entry_points=[MessageHandler(Filters.text & ~Filters.command, start)],
         states={
             FIRST: [
                 CallbackQueryHandler(one, pattern='^' + str(ONE) + '$'),
