@@ -10,7 +10,9 @@ Setting up your own Telegram bot is straight forward according to the [Telegram 
 ## Getting Started
 
 Insert the bot token you obtained during setup of your Telegram bot into the `bot.env` file.
+
 Install [ffmpeg](https://ffmpeg.org/) on your system and make sure it is available in your [system PATH](https://en.wikipedia.org/wiki/PATH_(variable)).
+
 Setup a python3 environment (e.g. with [virtualenv](https://virtualenv.pypa.io/en/stable/)) and source it.:
 ```
 virtualenv -p python3 ~/.venv/youtube-telegram-downloader
@@ -45,6 +47,7 @@ More to be added according to the implemented features..
 
 - [x] Interact with the user
 - [x] Automatically download videos from URL provided via message
+
     - [ ] Audio Quality selectable
     - [ ] Audio Format selectable
     - [ ] Audio Quality Default Value selectable
