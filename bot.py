@@ -14,7 +14,7 @@ Press Ctrl-C on the command line to stop the bot.
 """
 from dotenv import load_dotenv
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Updater, CommandHandler, CallbackQueryHandler, ConversationHandler
+from telegram.ext import CallbackQueryHandler, ConversationHandler, CommandHandler, Filters, MessageHandler, Updater
 import logging
 import os
 
@@ -47,8 +47,8 @@ def start(update, context):
     # a list (hence `[[...]]`).
     keyboard = [
         [
-            InlineKeyboardButton("1", callback_data=str(ONE)),
-            InlineKeyboardButton("2", callback_data=str(TWO)),
+            InlineKeyboardButton("Download 1", callback_data=str(ONE)),
+            # InlineKeyboardButton("Download 2", callback_data=str(TWO)),
         ]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -85,8 +85,8 @@ def one(update, context):
     query.answer()
     keyboard = [
         [
-            InlineKeyboardButton("3", callback_data=str(THREE)),
-            InlineKeyboardButton("4", callback_data=str(FOUR)),
+            InlineKeyboardButton("MP3", callback_data=str(THREE)),
+            # InlineKeyboardButton("4", callback_data=str(FOUR)),
         ]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -119,8 +119,8 @@ def three(update, context):
     query.answer()
     keyboard = [
         [
-            InlineKeyboardButton("Yes, let's do it again!", callback_data=str(ONE)),
-            InlineKeyboardButton("Nah, I've had enough ...", callback_data=str(TWO)),
+            # InlineKeyboardButton("Yes, let's do it again!", callback_data=str(ONE)),
+            InlineKeyboardButton("Thanks", callback_data=str(TWO)),
         ]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -156,6 +156,10 @@ def end(update, context):
     query.edit_message_text(text="See you next time!")
     return ConversationHandler.END
 
+def echo(update, context):
+    """Echo the user message."""
+    update.message.reply_text(update.message.text)
+
 
 def main():
     # Create the Updater and pass it your bot's token.
@@ -171,7 +175,7 @@ def main():
     # $ means "end of line/string"
     # So ^ABC$ will only allow 'ABC'
     conv_handler = ConversationHandler(
-        entry_points=[CommandHandler('start', start)],
+        entry_points=[MessageHandler(Filters.text & ~Filters.command, start)],
         states={
             FIRST: [
                 CallbackQueryHandler(one, pattern='^' + str(ONE) + '$'),
