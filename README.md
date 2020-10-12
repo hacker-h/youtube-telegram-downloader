@@ -5,11 +5,12 @@ The audiotrack of this video will be extracted and uploaded to one of your stora
 
 ## Create your Telegram bot
 
-Setting up your own Telegram bot is straight forward according to the [documentation](https://core.telegram.org/bots).
+Setting up your own Telegram bot is straight forward according to the [Telegram bots documentation](https://core.telegram.org/bots).
 
 ## Getting Started
 
 Insert the bot token you obtained during setup of your Telegram bot into the `bot.env` file.
+Install [ffmpeg](https://ffmpeg.org/) on your system and make sure it is available in your [system PATH](https://en.wikipedia.org/wiki/PATH_(variable)).
 Setup a python3 environment (e.g. with [virtualenv](https://virtualenv.pypa.io/en/stable/)) and source it.:
 ```
 virtualenv -p python3 ~/.venv/youtube-telegram-downloader
@@ -21,23 +22,36 @@ git clone https://github.com/hacker-h/youtube-telegram-downloader.git
 pip3 install -r ./youtube-telegram-downloader/requirements.txt
 ```
 
-Run the bot:
+Install [Telegram](https://telegram.org/) on a system of your choice and add your bot as a contact.
+
+## Usage
+
+1. Run the bot:
 ```
 python3 ./youtube-telegram-downloader/bot.py
 ```
+
+2. Send the bot a link to a video you want to be downloaded, e.g. a Youtube URL.
+
+3. Confirm the video the bot found on this URL by clicking `Download`.
+
+4. Watch the bot downloading your video.
+
+5. The bot converts the video to MP3 in highest quality available and confirms the accomplishment of this task with `Done!`.
 
 More to be added according to the implemented features..
 
 ## Features
 
 - [x] Interact with the user
-- [ ] Automatically download videos from URL provided via message
+- [x] Automatically download videos from URL provided via message
     - [ ] Audio Quality selectable
     - [ ] Audio Format selectable
     - [ ] Audio Quality Default Value selectable
     - [ ] Audio Format Default Value selectable
 - [ ] Automatically upload downloaded video to a remote backend
     - [ ] Google Drive
-    - [ ] Overcast
+    - [ ] [Overcast](https://overcast.fm/)
+- [ ] Secure your bot against unauthorized access
 - [ ] Bot can be run as a Container Image
 - [ ] Container Image available on Docker Hub
