@@ -24,7 +24,7 @@ git clone https://github.com/hacker-h/youtube-telegram-downloader.git
 pip3 install -r ./youtube-telegram-downloader/requirements.txt
 ```
 
-Install [Telegram](https://telegram.org/) on a system of your choice and add your bot as a contact.
+Install the [Telegram Messenger](https://telegram.org/) on a system of your choice and search for your bot as a contact to create a conversation.
 
 ## Usage
 
@@ -47,7 +47,7 @@ More to be added according to the implemented features..
 
 - [x] Interact with the user
 - [x] Automatically download videos from URL provided via message
-
+    - [ ] Code cleanup
     - [ ] Audio Quality selectable
     - [ ] Audio Format selectable
     - [ ] Audio Quality Default Value selectable
