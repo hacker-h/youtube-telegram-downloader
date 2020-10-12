@@ -31,3 +31,4 @@ tornado==6.0.4
 tzlocal==2.1
 urllib3==1.25.8
 webencodings==0.5.1
+youtube-dl==2020.9.20
