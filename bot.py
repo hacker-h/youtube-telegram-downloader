@@ -83,10 +83,10 @@ def selectFormat(update, context):
     query = update.callback_query
     query.answer()
     #dynamically build a menu
-    list_of_cities = ['THESE','ARE','AUTO', 'GENERATED', 'BUTTONS',"In the future you will select formats"]
+    list_of_buttons = ['THESE','ARE','AUTO', 'GENERATED', 'BUTTONS',"In the future you will select formats"]
     button_list = []
-    for each in list_of_cities:
-        button_list.append(InlineKeyboardButton(each, callback_data = each))
+    for text in list_of_buttons:
+        button_list.append(InlineKeyboardButton(text, callback_data = text))
     reply_markup=InlineKeyboardMarkup(build_menu(button_list,n_cols=1))
 
     query.edit_message_text(
