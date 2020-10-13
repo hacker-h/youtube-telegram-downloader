@@ -34,11 +34,10 @@ logger = logging.getLogger(__name__)
 # TODO code cleanup!
 
 # Stages
-FIRST, SECOND = range(2)
+FORMAT, OUTPUT, STORAGE, DOWNLOAD = range(4)
 # Callback data
-ONE, TWO, THREE, FOUR = range(4)
+MP4, MP3, OVERCAST, DRIVE = ["MP4", "MP3", "OVERCAST", "DRIVE"]
 
-global url
 
 def start(update, context):
     """Send message on `/start`."""
@@ -48,8 +47,9 @@ def start(update, context):
     user = update.message.from_user
 
     # update global URL object
-    global url
     url = update.message.text
+    # save url to user context
+    context.user_data["url"] = url
     logger.info("User %s started the conversation with '%s'.", user.first_name, url)
     # Build InlineKeyboard where each button has a displayed text
     # and a string as callback_data
@@ -57,7 +57,7 @@ def start(update, context):
     # a list (hence `[[...]]`).
     keyboard = [
         [
-            InlineKeyboardButton("Download", callback_data=str(TWO)),
+            InlineKeyboardButton("Download",callback_data="Download"),
             # InlineKeyboardButton("Abort", callback_data=str(ONE)),
         ]
     ]
@@ -65,115 +65,85 @@ def start(update, context):
     # Send message with text and appended InlineKeyboard
     update.message.reply_text("Do you want me to download '%s' ?" % url, reply_markup=reply_markup)
     # Tell ConversationHandler that we're in state `FIRST` now
-    # return FIRST
-    return SECOND
+    # return LINK
+    return FORMAT
 
 
-def start_over(update, context):
-    """Prompt same text & keyboard as `start` does but not as new message"""
-    # Get CallbackQuery from Update
-    query = update.callback_query
-    # CallbackQueries need to be answered, even if no notification to the user is needed
-    # Some clients may have trouble otherwise. See https://core.telegram.org/bots/api#callbackquery
-    query.answer()
-    keyboard = [
-        [
-            InlineKeyboardButton("1", callback_data=str(ONE)),
-            InlineKeyboardButton("2", callback_data=str(TWO)),
-        ]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    # Instead of sending a new message, edit the message that
-    # originated the CallbackQuery. This gives the feeling of an
-    # interactive menu.
-    query.edit_message_text(text="Start handler, Choose a route", reply_markup=reply_markup)
-    return FIRST
+def build_menu(buttons,n_cols,header_buttons=None,footer_buttons=None):
+    menu = [buttons[i:i + n_cols] for i in range(0, len(buttons), n_cols)]
+    if header_buttons:
+        menu.insert(0, header_buttons)
+    if footer_buttons:
+        menu.append(footer_buttons)
+    return menu
 
-
-def one(update, context):
-    """Show new choice of buttons"""
-    logger.info("one()")
-
-    query = update.callback_query
-    query.answer()
-    keyboard = [
-        [
-            InlineKeyboardButton("Do nothing", callback_data=str(TWO)),
-            # InlineKeyboardButton("Do nothing", callback_data=str(THREE)),
-            # InlineKeyboardButton("4", callback_data=str(FOUR)),
-        ]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    query.edit_message_text(
-        text="To which format shall the audio be converted?", reply_markup=reply_markup
-    )
-    # return FIRST
-    return SECOND
-
-
-def two(update, context):
+def selectFormat(update, context):
     """Show new choice of buttons"""
     logger.info("two()")
     query = update.callback_query
     query.answer()
-    keyboard = [
-        [
-            InlineKeyboardButton("1", callback_data=str(ONE)),
-            InlineKeyboardButton("3", callback_data=str(THREE)),
-        ]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
+    #dynamically build a menu
+    list_of_buttons = ['THESE','ARE','AUTO', 'GENERATED', 'BUTTONS',"In the future you will select formats"]
+    button_list = []
+    for text in list_of_buttons:
+        button_list.append(InlineKeyboardButton(text, callback_data = text))
+    reply_markup=InlineKeyboardMarkup(build_menu(button_list,n_cols=1))
+
     query.edit_message_text(
-        text="Second CallbackQueryHandler, Choose a route", reply_markup=reply_markup
+        text="Choose Format, Choose a route", reply_markup=reply_markup
     )
-    return FIRST
+    return OUTPUT
 
-
-def three(update, context):
+def output(update, context):
+    print(update.message)
+    print()
     """Show new choice of buttons"""
-    logger.info("three()")
+    logger.info("output")
     query = update.callback_query
+    context.user_data["format"] = query.data
     query.answer()
     keyboard = [
         [
-            # InlineKeyboardButton("Yes, let's do it again!", callback_data=str(ONE)),
-            InlineKeyboardButton("Thanks", callback_data=str(TWO)),
+            InlineKeyboardButton("Audio", callback_data=str(MP3)),
+            InlineKeyboardButton("Video", callback_data=str(MP4)),
         ]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     query.edit_message_text(
-        text="Third CallbackQueryHandler. Do want to start over?", reply_markup=reply_markup
+        text="Do you want to download as Video or Audio", reply_markup=reply_markup
     )
-    # Transfer to conversation state `SECOND`
-    return SECOND
+    return STORAGE
 
-
-def four(update, context):
+def storage(update, context):
     """Show new choice of buttons"""
-    logger.info("four()")
+    logger.info("storage()")
     query = update.callback_query
+    context.user_data["output"] = query.data
     query.answer()
     keyboard = [
         [
-            InlineKeyboardButton("2", callback_data=str(TWO)),
-            InlineKeyboardButton("4", callback_data=str(FOUR)),
+            InlineKeyboardButton("Overcast", callback_data=str(OVERCAST)),
+            InlineKeyboardButton("Google Drive", callback_data=str(DRIVE)),
         ]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     query.edit_message_text(
-        text="Fourth CallbackQueryHandler, Choose a route", reply_markup=reply_markup
+        text="Where Do you Wnat do download", reply_markup=reply_markup
     )
-    return FIRST
+    return DOWNLOAD
 
 
-def end(update, context):
+def download(update, context):
     """Returns `ConversationHandler.END`, which tells the
     ConversationHandler that the conversation is over"""
     query = update.callback_query
-    query.edit_message_text(text="Downloading..")
-    global url
+    context.user_data["storage"] = query.data
+    # print all settings
+    print(context.user_data)
+    query.edit_message_text(text=context.user_data)
+    url = context.user_data["url"]
     logger.info(url)
-
+    # get url from context
     # some default configurations for video downloads
     extension = 'mp3'
     ydl_opts = {
@@ -206,6 +176,7 @@ def main():
 
     # Setup conversation handler with the states FIRST and SECOND
     # Use the pattern parameter to pass CallbackQueries with specific
+
     # data pattern to the corresponding handlers.
     # ^ means "start of line/string"
     # $ means "end of line/string"
@@ -213,17 +184,22 @@ def main():
     conv_handler = ConversationHandler(
         entry_points=[MessageHandler(Filters.text & ~Filters.command, start)],
         states={
-            FIRST: [
-                CallbackQueryHandler(one, pattern='^' + str(ONE) + '$'),
-                CallbackQueryHandler(two, pattern='^' + str(TWO) + '$'),
-                CallbackQueryHandler(three, pattern='^' + str(THREE) + '$'),
-                CallbackQueryHandler(four, pattern='^' + str(FOUR) + '$'),
+            FORMAT: [
+                CallbackQueryHandler(selectFormat),
             ],
-            SECOND: [
-                CallbackQueryHandler(start_over, pattern='^' + str(ONE) + '$'),
-                CallbackQueryHandler(end, pattern='^' + str(TWO) + '$'),
+            OUTPUT: [
+                CallbackQueryHandler(output),
+            ],
+            STORAGE: [
+                CallbackQueryHandler(storage)
+            ],
+            DOWNLOAD: [
+                CallbackQueryHandler(download),
             ],
         },
+        allow_reentry = False,
+        per_user=True,
+        conversation_timeout=100,
         fallbacks=[CommandHandler('start', start)],
     )
 
