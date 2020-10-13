@@ -138,11 +138,12 @@ def download(update, context):
     ConversationHandler that the conversation is over"""
     query = update.callback_query
     context.user_data["storage"] = query.data
+    # print all settings
     print(context.user_data)
     query.edit_message_text(text=context.user_data)
+    url = context.user_data["url"]
     logger.info(url)
     # get url from context
-    url = context.user_data["url"]
     # some default configurations for video downloads
     extension = 'mp3'
     ydl_opts = {
