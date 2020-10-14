@@ -56,5 +56,5 @@ More to be added according to the implemented features..
     - [ ] Google Drive
     - [ ] [Overcast](https://overcast.fm/)
 - [ ] Secure your bot against unauthorized access
-- [ ] Bot can be run as a Container Image
+- [x] Bot can be run as a Container Image
 - [ ] Container Image available on Docker Hub
