@@ -18,6 +18,7 @@ from telegram.ext import CallbackQueryHandler, ConversationHandler, CommandHandl
 import logging
 import os
 import youtube_dl 
+from hurry.filesize import size
 
 # load environment variables
 load_dotenv(dotenv_path='./bot.env')
@@ -88,23 +89,17 @@ def selectFormat(update, context):
         meta = ydl.extract_info(
             url, download=False) 
         formats = meta.get('formats', [meta])
-    for f in formats:
-        print(f['ext'])
-        print(f)
-    
-    print("#####")
-    print(formats)
-    #{'format_id': '243', 'url': 'removed', 'player_url': 'removed', 'ext': 'webm', 'height': 266, 'format_note': '360p', 
-    # 'vcodec': 'vp9', 'asr': None, 'filesize': 2663114, 'fps': 24, 'tbr': 267.658, 'width': 640, 'acodec': 'none', 
-    # 'downloader_options': {'http_chunk_size': 10485760}, 'format': '243 - 640x266 (360p)', 'protocol': 'https', 
-    # 'http_headers': {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/68.0.3440.128 Safari/537.36', 
-    # 'Accept-Charset': 'ISO-8859-1,utf-8;q=0.7,*;q=0.7', 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8', 
-    # 'Accept-Encoding': 'gzip, deflate', 'Accept-Language': 'en-us,en;q=0.5'}}
-    #dynamically build a menu
-    list_of_buttons = ['THESE','ARE','AUTO', 'GENERATED', 'BUTTONS',"In the future you will select formats"]
+    #dynamically build a format menu
     button_list = []
-    for text in list_of_buttons:
-        button_list.append(InlineKeyboardButton(text, callback_data = text))
+    for f in formats:
+        #{'format_id': '243', 'url': '...', 'player_url': '...', 'ext': 'webm', 'height': 266, 'format_note': '360p', 
+        # 'vcodec': 'vp9', 'asr': None, 'filesize': 2663114, 'fps': 24, 'tbr': 267.658, 'width': 640, 'acodec': 'none', 
+        # 'downloader_options': {'http_chunk_size': 10485760}, 'format': '243 - 640x266 (360p)', 'protocol': 'https', 
+        # 'http_headers': {'User-Agent': '...', 
+        # 'Accept-Charset': '...', 'Accept': '...', 
+        # 'Accept-Encoding': 'gzip, deflate', 'Accept-Language': 'en-us,en;q=0.5'}}
+        format_text = f"{f['format_note']}, {f['height']}x{f['width']}, type: {f['ext']}, fps: {f['fps']}, {size(f['filesize'])}"
+        button_list.append(InlineKeyboardButton(format_text, callback_data = f["ext"]))
     reply_markup=InlineKeyboardMarkup(build_menu(button_list,n_cols=1))
 
     query.edit_message_text(
