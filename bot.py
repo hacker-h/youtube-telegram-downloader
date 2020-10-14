@@ -82,6 +82,24 @@ def selectFormat(update, context):
     logger.info("two()")
     query = update.callback_query
     query.answer()
+    url = context.user_data["url"]
+    ydl_opts = {}
+    with youtube_dl.YoutubeDL(ydl_opts) as ydl:
+        meta = ydl.extract_info(
+            url, download=False) 
+        formats = meta.get('formats', [meta])
+    for f in formats:
+        print(f['ext'])
+        print(f)
+    
+    print("#####")
+    print(formats)
+    #{'format_id': '243', 'url': 'removed', 'player_url': 'removed', 'ext': 'webm', 'height': 266, 'format_note': '360p', 
+    # 'vcodec': 'vp9', 'asr': None, 'filesize': 2663114, 'fps': 24, 'tbr': 267.658, 'width': 640, 'acodec': 'none', 
+    # 'downloader_options': {'http_chunk_size': 10485760}, 'format': '243 - 640x266 (360p)', 'protocol': 'https', 
+    # 'http_headers': {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/68.0.3440.128 Safari/537.36', 
+    # 'Accept-Charset': 'ISO-8859-1,utf-8;q=0.7,*;q=0.7', 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8', 
+    # 'Accept-Encoding': 'gzip, deflate', 'Accept-Language': 'en-us,en;q=0.5'}}
     #dynamically build a menu
     list_of_buttons = ['THESE','ARE','AUTO', 'GENERATED', 'BUTTONS',"In the future you will select formats"]
     button_list = []
