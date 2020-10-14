@@ -19,17 +19,22 @@ import logging
 import os
 import youtube_dl 
 
-# load environment variables
-load_dotenv(dotenv_path='./bot.env')
-
-BOT_TOKEN = os.getenv('BOT_TOKEN')
-
 # Enable logging
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO
 )
 
 logger = logging.getLogger(__name__)
+
+# load env variables, passes silently if file is not existing
+load_dotenv(dotenv_path='./bot.env')
+
+BOT_TOKEN = os.getenv('BOT_TOKEN', None)
+
+# error if there is no bot token passed
+if BOT_TOKEN is None:
+    logger.error("BOT_TOKEN is not set, exiting.")
+    exit(1)
 
 # TODO code cleanup!
 
