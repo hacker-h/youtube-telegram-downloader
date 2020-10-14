@@ -90,7 +90,7 @@ def selectFormat(update, context):
         meta = ydl.extract_info(
             url, download=False) 
         formats = meta.get('formats', [meta])
-        
+
     #dynamically build a format menu
     button_list = []
     for f in formats:
@@ -100,7 +100,7 @@ def selectFormat(update, context):
         # 'http_headers': {'User-Agent': '...', 
         # 'Accept-Charset': '...', 'Accept': '...', 
         # 'Accept-Encoding': 'gzip, deflate', 'Accept-Language': 'en-us,en;q=0.5'}}
-        format_text = f"{f['format_note']}, {f['height']}x{f['width']}, type: {f['ext']}, fps: {f['fps']}, {size(f['filesize'])}"
+        format_text = f"{f['format_note']}, {f['height']}x{f['width']}, type: {f['ext']}, fps: {f['fps']}, {size(f['filesize']) if f['filesize'] else 'None'}"
         button_list.append(InlineKeyboardButton(format_text, callback_data = f['format_id']))
     reply_markup=InlineKeyboardMarkup(build_menu(button_list,n_cols=1))
 
