@@ -93,6 +93,7 @@ def selectFormat(update, context):
 
     #dynamically build a format menu
     button_list = []
+    button_list.append(InlineKeyboardButton("Best Quality", callback_data = "best"))
     for f in formats:
         #{'format_id': '243', 'url': '...', 'player_url': '...', 'ext': 'webm', 'height': 266, 'format_note': '360p', 
         # 'vcodec': 'vp9', 'asr': None, 'filesize': 2663114, 'fps': 24, 'tbr': 267.658, 'width': 640, 'acodec': 'none', 
