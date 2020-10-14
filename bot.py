@@ -83,12 +83,14 @@ def selectFormat(update, context):
     logger.info("two()")
     query = update.callback_query
     query.answer()
+    #get formats
     url = context.user_data["url"]
     ydl_opts = {}
     with youtube_dl.YoutubeDL(ydl_opts) as ydl:
         meta = ydl.extract_info(
             url, download=False) 
         formats = meta.get('formats', [meta])
+        
     #dynamically build a format menu
     button_list = []
     for f in formats:
@@ -99,11 +101,11 @@ def selectFormat(update, context):
         # 'Accept-Charset': '...', 'Accept': '...', 
         # 'Accept-Encoding': 'gzip, deflate', 'Accept-Language': 'en-us,en;q=0.5'}}
         format_text = f"{f['format_note']}, {f['height']}x{f['width']}, type: {f['ext']}, fps: {f['fps']}, {size(f['filesize'])}"
-        button_list.append(InlineKeyboardButton(format_text, callback_data = f["ext"]))
+        button_list.append(InlineKeyboardButton(format_text, callback_data = f['format_id']))
     reply_markup=InlineKeyboardMarkup(build_menu(button_list,n_cols=1))
 
     query.edit_message_text(
-        text="Choose Format, Choose a route", reply_markup=reply_markup
+        text="Choose Format", reply_markup=reply_markup
     )
     return OUTPUT
 
