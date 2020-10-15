@@ -18,6 +18,7 @@ from telegram.ext import CallbackQueryHandler, ConversationHandler, CommandHandl
 import logging
 import os
 import youtube_dl 
+from hurry.filesize import size
 
 # Enable logging
 logging.basicConfig(
@@ -39,7 +40,7 @@ if BOT_TOKEN is None:
 # TODO code cleanup!
 
 # Stages
-FORMAT, OUTPUT, STORAGE, DOWNLOAD = range(4)
+OUTPUT, STORAGE, DOWNLOAD = range(3)
 # Callback data
 MP4, MP3, OVERCAST, DRIVE = ["MP4", "MP3", "OVERCAST", "DRIVE"]
 
@@ -62,7 +63,8 @@ def start(update, context):
     # a list (hence `[[...]]`).
     keyboard = [
         [
-            InlineKeyboardButton("Download",callback_data="Download"),
+            InlineKeyboardButton("Download Best Format",callback_data="best"),
+            InlineKeyboardButton("Select Format", callback_data="format"),
             # InlineKeyboardButton("Abort", callback_data=str(ONE)),
         ]
     ]
@@ -71,7 +73,7 @@ def start(update, context):
     update.message.reply_text("Do you want me to download '%s' ?" % url, reply_markup=reply_markup)
     # Tell ConversationHandler that we're in state `FIRST` now
     # return LINK
-    return FORMAT
+    return OUTPUT
 
 
 def build_menu(buttons,n_cols,header_buttons=None,footer_buttons=None):
@@ -84,26 +86,40 @@ def build_menu(buttons,n_cols,header_buttons=None,footer_buttons=None):
 
 def selectFormat(update, context):
     """Show new choice of buttons"""
-    logger.info("two()")
+    logger.info("selectFormat")
     query = update.callback_query
     query.answer()
-    #dynamically build a menu
-    list_of_buttons = ['THESE','ARE','AUTO', 'GENERATED', 'BUTTONS',"In the future you will select formats"]
+    #get formats
+    url = context.user_data["url"]
+    ydl_opts = {}
+    with youtube_dl.YoutubeDL(ydl_opts) as ydl:
+        meta = ydl.extract_info(
+            url, download=False) 
+        formats = meta.get('formats', [meta])
+
+    #dynamically build a format menu
+    formats = sorted(formats, key=lambda k: k['ext'])
     button_list = []
-    for text in list_of_buttons:
-        button_list.append(InlineKeyboardButton(text, callback_data = text))
+    button_list.append(InlineKeyboardButton("Best Quality", callback_data = "best"))
+    for f in formats:
+        #{'format_id': '243', 'url': '...', 'player_url': '...', 'ext': 'webm', 'height': 266, 'format_note': '360p', 
+        # 'vcodec': 'vp9', 'asr': None, 'filesize': 2663114, 'fps': 24, 'tbr': 267.658, 'width': 640, 'acodec': 'none', 
+        # 'downloader_options': {'http_chunk_size': 10485760}, 'format': '243 - 640x266 (360p)', 'protocol': 'https', 
+        # 'http_headers': {'User-Agent': '...', 
+        # 'Accept-Charset': '...', 'Accept': '...', 
+        # 'Accept-Encoding': 'gzip, deflate', 'Accept-Language': 'en-us,en;q=0.5'}}
+        format_text = f"{f['format_note']}, {f['height']}x{f['width']}, type: {f['ext']}, fps: {f['fps']}, {size(f['filesize']) if f['filesize'] else 'None'}"
+        button_list.append(InlineKeyboardButton(format_text, callback_data = f['format_id']))
     reply_markup=InlineKeyboardMarkup(build_menu(button_list,n_cols=1))
 
     query.edit_message_text(
-        text="Choose Format, Choose a route", reply_markup=reply_markup
+        text="Choose Format", reply_markup=reply_markup
     )
     return OUTPUT
 
 def output(update, context):
-    print(update.message)
-    print()
     """Show new choice of buttons"""
-    logger.info("output")
+    logger.info("output()")
     query = update.callback_query
     context.user_data["format"] = query.data
     query.answer()
@@ -144,15 +160,15 @@ def download(update, context):
     query = update.callback_query
     context.user_data["storage"] = query.data
     # print all settings
-    print(context.user_data)
     query.edit_message_text(text=context.user_data)
     url = context.user_data["url"]
+    selected_format = context.user_data["format"]
     logger.info(url)
     # get url from context
     # some default configurations for video downloads
     extension = 'mp3'
     ydl_opts = {
-        'format': 'bestaudio/best',
+        'format': selected_format,
         'restrictfilenames' : True,
         'outtmpl': '%(title)s.%(ext)s',
         'postprocessors': [{
@@ -189,10 +205,9 @@ def main():
     conv_handler = ConversationHandler(
         entry_points=[MessageHandler(Filters.text & ~Filters.command, start)],
         states={
-            FORMAT: [
-                CallbackQueryHandler(selectFormat),
-            ],
+
             OUTPUT: [
+                CallbackQueryHandler(selectFormat, pattern='^' + "format" + '$'),
                 CallbackQueryHandler(output),
             ],
             STORAGE: [
@@ -204,7 +219,6 @@ def main():
         },
         allow_reentry = False,
         per_user=True,
-        conversation_timeout=100,
         fallbacks=[CommandHandler('start', start)],
     )
 
