@@ -93,6 +93,7 @@ def selectFormat(update, context):
         formats = meta.get('formats', [meta])
 
     #dynamically build a format menu
+    formats = sorted(formats, key=lambda k: k['ext'])
     button_list = []
     button_list.append(InlineKeyboardButton("Best Quality", callback_data = "best"))
     for f in formats:
