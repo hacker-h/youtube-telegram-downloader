@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 # TODO code cleanup!
 
 # Stages
-FORMAT, OUTPUT, STORAGE, DOWNLOAD = range(4)
+OUTPUT, STORAGE, DOWNLOAD = range(3)
 # Callback data
 MP4, MP3, OVERCAST, DRIVE = ["MP4", "MP3", "OVERCAST", "DRIVE"]
 
@@ -58,7 +58,8 @@ def start(update, context):
     # a list (hence `[[...]]`).
     keyboard = [
         [
-            InlineKeyboardButton("Download",callback_data="Download"),
+            InlineKeyboardButton("Download Best Format",callback_data="best"),
+            InlineKeyboardButton("Select Format", callback_data="format"),
             # InlineKeyboardButton("Abort", callback_data=str(ONE)),
         ]
     ]
@@ -67,7 +68,7 @@ def start(update, context):
     update.message.reply_text("Do you want me to download '%s' ?" % url, reply_markup=reply_markup)
     # Tell ConversationHandler that we're in state `FIRST` now
     # return LINK
-    return FORMAT
+    return OUTPUT
 
 
 def build_menu(buttons,n_cols,header_buttons=None,footer_buttons=None):
@@ -80,7 +81,7 @@ def build_menu(buttons,n_cols,header_buttons=None,footer_buttons=None):
 
 def selectFormat(update, context):
     """Show new choice of buttons"""
-    logger.info("two()")
+    logger.info("selectFormat")
     query = update.callback_query
     query.answer()
     #get formats
@@ -111,10 +112,8 @@ def selectFormat(update, context):
     return OUTPUT
 
 def output(update, context):
-    print(update.message)
-    print()
     """Show new choice of buttons"""
-    logger.info("output")
+    logger.info("output()")
     query = update.callback_query
     context.user_data["format"] = query.data
     query.answer()
@@ -155,15 +154,15 @@ def download(update, context):
     query = update.callback_query
     context.user_data["storage"] = query.data
     # print all settings
-    print(context.user_data)
     query.edit_message_text(text=context.user_data)
     url = context.user_data["url"]
+    selected_format = context.user_data["format"]
     logger.info(url)
     # get url from context
     # some default configurations for video downloads
     extension = 'mp3'
     ydl_opts = {
-        'format': 'bestaudio/best',
+        'format': selected_format,
         'restrictfilenames' : True,
         'outtmpl': '%(title)s.%(ext)s',
         'postprocessors': [{
@@ -200,10 +199,9 @@ def main():
     conv_handler = ConversationHandler(
         entry_points=[MessageHandler(Filters.text & ~Filters.command, start)],
         states={
-            FORMAT: [
-                CallbackQueryHandler(selectFormat),
-            ],
+
             OUTPUT: [
+                CallbackQueryHandler(selectFormat, pattern='^' + "format" + '$'),
                 CallbackQueryHandler(output),
             ],
             STORAGE: [
@@ -215,7 +213,6 @@ def main():
         },
         allow_reentry = False,
         per_user=True,
-        conversation_timeout=100,
         fallbacks=[CommandHandler('start', start)],
     )
 
