@@ -14,6 +14,11 @@ Insert the bot token you obtained during setup of your Telegram bot into the `bo
 
 Install the [Telegram Messenger](https://telegram.org/) on a system of your choice and search for your bot as a contact to create a conversation.
 
+## Setting up your backend
+
+### Google Drive
+Follow the instructions on [setting up PyDrive Authentication](https://pythonhosted.org/PyDrive/quickstart.html#authentication).
+
 ## Run the Telegram bot
 
 ### Option 1: as a Docker container

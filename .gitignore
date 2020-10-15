@@ -1,2 +1,7 @@
 # ignore environment files
 *.env
+
+# ignore secrets
+client_secrets.json
+credentials.json
+settings.yaml
