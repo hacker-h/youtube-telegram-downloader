@@ -1,2 +1,7 @@
 # ignore environment files
 *.env
+
+# ignore downloaded media files
+*.mp3
+*.mp4
+*.webm
