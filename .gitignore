@@ -1,3 +1,6 @@
+# ignore IDE config
+.vscode
+
 # ignore environment files
 *.env
 

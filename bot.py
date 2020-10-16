@@ -42,7 +42,12 @@ if BOT_TOKEN is None:
 # Stages
 OUTPUT, STORAGE, DOWNLOAD = range(3)
 # Callback data
-MP4, MP3, OVERCAST, DRIVE = ["MP4", "MP3", "OVERCAST", "DRIVE"]
+CALLBACK_MP4 = "mp4"
+CALLBACK_MP3 = "mp3"
+CALLBACK_OVERCAST = "overcast"
+CALLBACK_GOOGLE_DRIVE = "drive"
+CALLBACK_BEST_FORMAT = "best"
+CALLBACK_SELECT_FORMAT = "select"
 
 
 def start(update, context):
@@ -63,8 +68,10 @@ def start(update, context):
     # a list (hence `[[...]]`).
     keyboard = [
         [
-            InlineKeyboardButton("Download Best Format", callback_data="best"),
-            InlineKeyboardButton("Select Format", callback_data="format"),
+            InlineKeyboardButton("Download Best Format",
+                                 callback_data=CALLBACK_BEST_FORMAT),
+            InlineKeyboardButton(
+                "Select Format", callback_data=CALLBACK_SELECT_FORMAT),
             # InlineKeyboardButton("Abort", callback_data=str(ONE)),
         ]
     ]
@@ -97,14 +104,14 @@ def selectFormat(update, context):
     with youtube_dl.YoutubeDL(ydl_opts) as ydl:
         meta = ydl.extract_info(
             url, download=False)
-        formats = meta.get('formats', [meta])
+        unsorted_formats = meta.get('formats', [meta])
 
     # dynamically build a format menu
-    formats = sorted(formats, key=lambda k: k['ext'])
+    sorted_formats = sorted(unsorted_formats, key=lambda k: k['ext'])
     button_list = []
     button_list.append(InlineKeyboardButton(
-        "Best Quality", callback_data="best"))
-    for f in formats:
+        "Best Quality", callback_data=CALLBACK_BEST_FORMAT))
+    for f in sorted_formats:
         # {'format_id': '243', 'url': '...', 'player_url': '...', 'ext': 'webm', 'height': 266, 'format_note': '360p',
         # 'vcodec': 'vp9', 'asr': None, 'filesize': 2663114, 'fps': 24, 'tbr': 267.658, 'width': 640, 'acodec': 'none',
         # 'downloader_options': {'http_chunk_size': 10485760}, 'format': '243 - 640x266 (360p)', 'protocol': 'https',
@@ -130,13 +137,13 @@ def output(update, context):
     query.answer()
     keyboard = [
         [
-            InlineKeyboardButton("Audio", callback_data=str(MP3)),
-            InlineKeyboardButton("Video", callback_data=str(MP4)),
+            InlineKeyboardButton("Audio", callback_data=CALLBACK_MP3),
+            InlineKeyboardButton("Video", callback_data=CALLBACK_MP4),
         ]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     query.edit_message_text(
-        text="Do you want to download as Video or Audio", reply_markup=reply_markup
+        text="Do you want to the Video or only Audio", reply_markup=reply_markup
     )
     return STORAGE
 
@@ -149,8 +156,9 @@ def storage(update, context):
     query.answer()
     keyboard = [
         [
-            InlineKeyboardButton("Overcast", callback_data=str(OVERCAST)),
-            InlineKeyboardButton("Google Drive", callback_data=str(DRIVE)),
+            InlineKeyboardButton("Overcast", callback_data=CALLBACK_OVERCAST),
+            InlineKeyboardButton(
+                "Google Drive", callback_data=CALLBACK_GOOGLE_DRIVE),
         ]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
