@@ -2,12 +2,12 @@
 
 class MetaStorageInterface(ABC):
     """
-    Abstract Class for implementing an backend
+    Abstract class to implement diffrent backends
     """
 
     def __init__(self, path):
         """
-        Output Path, -> google drive location
+        Output path/root folder
         """
         self.path = path
     
@@ -15,12 +15,12 @@ class MetaStorageInterface(ABC):
     @abstractmethod
     def upload(self, file):
         """
-        Upload Single file
+        Upload a single file
         """
         raise NotImplementedError
     
     def upload_multiple(self, files):
         """
-        Upload more than one file
+        Upload multiple files 
         """
         raise NotImplementedError
