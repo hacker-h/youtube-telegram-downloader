@@ -44,6 +44,12 @@ OUTPUT, STORAGE, DOWNLOAD = range(3)
 # Callback data
 MP4, MP3, OVERCAST, DRIVE = ["MP4", "MP3", "OVERCAST", "DRIVE"]
 
+def is_supported(url):
+    extractors = youtube_dl.extractor.gen_extractors()
+    for e in extractors:
+        if e.suitable(url) and e.IE_NAME != 'generic':
+            return True
+    return False
 
 def start(update, context):
     """Send message on `/start`."""
@@ -54,6 +60,8 @@ def start(update, context):
 
     # update global URL object
     url = update.message.text
+    
+     
     # save url to user context
     context.user_data["url"] = url
     logger.info("User %s started the conversation with '%s'.", user.first_name, url)
@@ -61,19 +69,22 @@ def start(update, context):
     # and a string as callback_data
     # The keyboard is a list of button rows, where each row is in turn
     # a list (hence `[[...]]`).
-    keyboard = [
-        [
-            InlineKeyboardButton("Download Best Format",callback_data="best"),
-            InlineKeyboardButton("Select Format", callback_data="format"),
-            # InlineKeyboardButton("Abort", callback_data=str(ONE)),
+    if is_supported(url):
+        keyboard = [
+            [
+                InlineKeyboardButton("Download Best Format",callback_data="best"),
+                InlineKeyboardButton("Select Format", callback_data="format"),
+                # InlineKeyboardButton("Abort", callback_data=str(ONE)),
+            ]
         ]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    # Send message with text and appended InlineKeyboard
-    update.message.reply_text("Do you want me to download '%s' ?" % url, reply_markup=reply_markup)
-    # Tell ConversationHandler that we're in state `FIRST` now
-    # return LINK
-    return OUTPUT
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        # Send message with text and appended InlineKeyboard
+        update.message.reply_text("Do you want me to download '%s' ?" % url, reply_markup=reply_markup)
+        return OUTPUT
+    else:
+        update.message.reply_text("I can't download your request '%s' 😤" % url)
+        ConversationHandler.END
+    
 
 
 def build_menu(buttons,n_cols,header_buttons=None,footer_buttons=None):
@@ -215,7 +226,7 @@ def main():
             ],
             DOWNLOAD: [
                 CallbackQueryHandler(download),
-            ],
+            ]
         },
         allow_reentry = False,
         per_user=True,
