@@ -1,8 +1,8 @@
 
 
-class MetaAdapter(ABC):
+class MetaStorageInterface(ABC):
     """
-    Abstract Class for implementing an Adapter
+    Abstract Class for implementing an backend
     """
 
     def __init__(self, path):
