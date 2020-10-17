@@ -13,3 +13,6 @@ settings.yaml
 *.mp3
 *.mp4
 *.webm
+
+# ignore python overhead
+backends/__pycache__

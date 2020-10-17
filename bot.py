@@ -19,6 +19,7 @@ import logging
 import os
 import youtube_dl
 from hurry.filesize import size
+from backends import google_drive
 
 # Enable logging
 logging.basicConfig(
@@ -49,6 +50,7 @@ CALLBACK_GOOGLE_DRIVE = "drive"
 CALLBACK_BEST_FORMAT = "best"
 CALLBACK_SELECT_FORMAT = "select"
 
+AUDIO_FILE_EXTENSION = 'mp3'
 
 def start(update, context):
     """Send message on `/start`."""
@@ -180,21 +182,39 @@ def download(update, context):
     logger.info(url)
     # get url from context
     # some default configurations for video downloads
-    extension = 'mp3'
     ydl_opts = {
         'format': selected_format,
         'restrictfilenames': True,
         'outtmpl': '%(title)s.%(ext)s',
         'postprocessors': [{
             'key': 'FFmpegExtractAudio',
-            'preferredcodec': extension,
+            'preferredcodec': AUDIO_FILE_EXTENSION,
             'preferredquality': '192',
         }],
     }
 
     with youtube_dl.YoutubeDL(ydl_opts) as ydl:
         result = ydl.extract_info("{}".format(url))
-        raw_name = ydl.prepare_filename(result)
+        original_name = ydl.prepare_filename(result)
+
+    raw_name = os.path.splitext(original_name)[0]
+
+    final_name = "%s.%s" %(raw_name, AUDIO_FILE_EXTENSION)
+
+    # upload the file
+    backend_name = context.user_data["storage"]
+    backend = None
+    if backend_name == CALLBACK_GOOGLE_DRIVE:
+        backend = google_drive.GoogleDriveStorage()
+    elif backend_name == CALLBACK_OVERCAST:
+        raise NotImplementedError
+    else:
+        logger.error("Invalid backend '%s'", backend)
+
+    print(final_name)
+    backend.upload(final_name)
+
+    # TODO delete the local file
 
     query = update.callback_query
     query.answer()
