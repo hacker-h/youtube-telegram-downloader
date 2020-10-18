@@ -2,14 +2,8 @@
 # -*- coding: utf-8 -*-
 """Simple inline keyboard bot with multiple CallbackQueryHandlers.
 
-This Bot uses the Updater class to handle the bot.
-First, a few callback functions are defined as callback query handler. Then, those functions are
-passed to the Dispatcher and registered at their respective places.
-Then, the bot is started and runs until we press Ctrl-C on the command line.
-Usage:
-Example of a bot that uses inline keyboard that has multiple CallbackQueryHandlers arranged in a
-ConversationHandler.
-Send /start to initiate the conversation.
+This bot uses an inline keyboard to interact with the user.
+
 Press Ctrl-C on the command line to stop the bot.
 """
 from dotenv import load_dotenv
@@ -33,12 +27,10 @@ load_dotenv(dotenv_path='./bot.env')
 
 BOT_TOKEN = os.getenv('BOT_TOKEN', None)
 
-# error if there is no bot token passed
+# error if there is no bot token set
 if BOT_TOKEN is None:
     logger.error("BOT_TOKEN is not set, exiting.")
     exit(1)
-
-# TODO code cleanup!
 
 # Stages
 OUTPUT, STORAGE, DOWNLOAD = range(3)
@@ -50,9 +42,14 @@ CALLBACK_OVERCAST = "overcast"
 CALLBACK_GOOGLE_DRIVE = "drive"
 CALLBACK_BEST_FORMAT = "best"
 CALLBACK_SELECT_FORMAT = "select_format"
+CALLBACK_ABORT = "abort"
 
 
 def is_supported(url):
+    """
+    Checks whether the URL type is eligible for youtube_dl.\n
+    Returns True or False.
+    """
     extractors = youtube_dl.extractor.gen_extractors()
     for e in extractors:
         if e.suitable(url) and e.IE_NAME != 'generic':
@@ -61,7 +58,9 @@ def is_supported(url):
 
 
 def start(update, context):
-    """Send message on `/start`."""
+    """
+    Invoked on every user message to create an interactive inline conversation.
+    """
 
     # Get user that sent /start and log his name
     user = update.message.from_user
@@ -82,8 +81,10 @@ def start(update, context):
             [
                 InlineKeyboardButton(
                     "Download Best Format", callback_data=CALLBACK_BEST_FORMAT),
-                InlineKeyboardButton("Select Format", callback_data=CALLBACK_SELECT_FORMAT),
-                # InlineKeyboardButton("Abort", callback_data=str(ONE)),
+                InlineKeyboardButton(
+                    "Select Format", callback_data=CALLBACK_SELECT_FORMAT),
+                # TODO add abort button
+                # InlineKeyboardButton("Abort", callback_data=CALLBACK_ABORT),
             ]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -92,11 +93,15 @@ def start(update, context):
             "Do you want me to download '%s' ?" % url, reply_markup=reply_markup)
         return OUTPUT
     else:
+        logger.info("Invalid url requested: '%s'", url)
         update.message.reply_text("I can't download your request '%s' 😤" % url)
         ConversationHandler.END
 
 
 def build_menu(buttons, n_cols, header_buttons=None, footer_buttons=None):
+    """
+    Creates an interactive button menu for the user.
+    """
     menu = [buttons[i:i + n_cols] for i in range(0, len(buttons), n_cols)]
     if header_buttons:
         menu.insert(0, header_buttons)
@@ -105,9 +110,11 @@ def build_menu(buttons, n_cols, header_buttons=None, footer_buttons=None):
     return menu
 
 
-def selectFormat(update, context):
-    """Show new choice of buttons"""
-    logger.info("selectFormat")
+def select_source_format(update, context):
+    """
+    A stage asking the user for the source format to be downloaded.
+    """
+    logger.info("select_format")
     query = update.callback_query
     query.answer()
     # get formats
@@ -115,7 +122,7 @@ def selectFormat(update, context):
     ydl_opts = {}
     with youtube_dl.YoutubeDL(ydl_opts) as ydl:
         meta = ydl.extract_info(
-            url, download=False)
+            url, download_media=False)
         formats = meta.get('formats', [meta])
 
     # dynamically build a format menu
@@ -141,8 +148,10 @@ def selectFormat(update, context):
     return OUTPUT
 
 
-def output(update, context):
-    """Show new choice of buttons"""
+def select_output_format(update, context):
+    """
+    A stage asking the user for the desired output media format.
+    """
     logger.info("output()")
     query = update.callback_query
     context.user_data[CALLBACK_SELECT_FORMAT] = query.data
@@ -160,8 +169,10 @@ def output(update, context):
     return STORAGE
 
 
-def storage(update, context):
-    """Show new choice of buttons"""
+def select_storage(update, context):
+    """
+    A stage asking the user for the storage backend to which the media file shall be uploaded.
+    """
     logger.info("storage()")
     query = update.callback_query
     context.user_data["output"] = query.data
@@ -180,18 +191,20 @@ def storage(update, context):
     return DOWNLOAD
 
 
-def download(update, context):
-    """Returns `ConversationHandler.END`, which tells the
-    ConversationHandler that the conversation is over"""
+def download_media(update, context):
+    """
+    A stage downloading the selected media and converting it to the desired output format.
+    Afterwards the file will be uploaded to the specified storage backend.
+    """
     query = update.callback_query
     context.user_data["storage"] = query.data
-    # print all settings
-    # query.edit_message_text(text=context.user_data)
+    logger.info("All settings: %s", context.user_data)
+
     query.edit_message_text(text="Downloading..")
     url = context.user_data["url"]
+    logger.info("Video URL to download: '%s'", url)
     selected_format = context.user_data[CALLBACK_SELECT_FORMAT]
-    logger.info(url)
-    # get url from context
+
     # some default configurations for video downloads
     MP3_EXTENSION = 'mp3'
     YOUTUBE_DL_OPTIONS = {
@@ -222,16 +235,19 @@ def download(update, context):
     else:
         logger.error("Invalid backend '%s'", backend)
 
+    # upload the media file
     query = update.callback_query
     query.answer()
     query.edit_message_text(text="Uploading..")
-
-    print(final_media_name)
+    logger.info("Uploading the file..")
     backend.upload(final_media_name)
+    logger.info("Upload finished.")
 
+    # finish conversation
     query = update.callback_query
     query.answer()
     query.edit_message_text(text="Done!")
+    logger.info("Done!")
     return ConversationHandler.END
 
 
@@ -244,7 +260,6 @@ def main():
 
     # Setup conversation handler with the states FIRST and SECOND
     # Use the pattern parameter to pass CallbackQueries with specific
-
     # data pattern to the corresponding handlers.
     # ^ means "start of line/string"
     # $ means "end of line/string"
@@ -255,14 +270,14 @@ def main():
 
             OUTPUT: [
                 CallbackQueryHandler(
-                    selectFormat, pattern="^%s$"%CALLBACK_SELECT_FORMAT),
-                CallbackQueryHandler(output),
+                    select_source_format, pattern="^%s$" % CALLBACK_SELECT_FORMAT),
+                CallbackQueryHandler(select_output_format),
             ],
             STORAGE: [
-                CallbackQueryHandler(storage)
+                CallbackQueryHandler(select_storage)
             ],
             DOWNLOAD: [
-                CallbackQueryHandler(download),
+                CallbackQueryHandler(download_media),
             ]
         },
         allow_reentry=False,

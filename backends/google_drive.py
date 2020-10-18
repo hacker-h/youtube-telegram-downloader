@@ -7,9 +7,9 @@ import os
 from backends.storage_interface import StorageInterface
 
 
-def md5(file_name):
+def get_md5_sum(file_name):
     """
-    Returns the md5 check sum of a file.
+    Returns the MD5 check sum of a file.
     """
     file_hash = hashlib.md5()
     with open(file_name, "rb") as file_handle:
@@ -20,8 +20,9 @@ def md5(file_name):
 
 
 class GoogleDriveStorage(StorageInterface):
+    DEFAULT_DESTINATION_ROOT="testDir"
 
-    def __init__(self, path="testDir"):
+    def __init__(self, destination_root_directory=DEFAULT_DESTINATION_ROOT):
         """
         Initialize logging and Google Drive authentication.
         """
@@ -33,7 +34,11 @@ class GoogleDriveStorage(StorageInterface):
 
         self.logger = logging.getLogger(__name__)
 
-        self.path = path
+        # self.destination_root_directory = destination_root_directory
+        self.destination_root_directory = self.DEFAULT_DESTINATION_ROOT
+        # TODO make directory name configurable
+        # this will require a parsing of the directory path
+        # all concerned subfolders will have to be looked up recursively in the file_exists function
 
         gauth = GoogleAuth()
         gauth.LocalWebserverAuth()
@@ -71,12 +76,8 @@ class GoogleDriveStorage(StorageInterface):
 
     def upload(self, local_file_name):
 
-        # TODO make directory name configurable
-
-        dir_name = 'testDir'
-
         # check whether the file already exists
-        folder_id = self.get_root_folder_id(dir_name)
+        folder_id = self.get_root_folder_id(self.destination_root_directory)
 
         file = self.file_exists(local_file_name, folder_id)
         if file is None:
@@ -90,7 +91,7 @@ class GoogleDriveStorage(StorageInterface):
             file_md5 = file['md5Checksum']
 
             # check if md5sums differ => update the remote file
-            local_md5 = md5(local_file_name)
+            local_md5 = get_md5_sum(local_file_name)
             if file_md5 == local_md5:
                 logging.info("file is already up to date")
             else:

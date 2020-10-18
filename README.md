@@ -63,7 +63,7 @@ More to be added according to the implemented features..
 
 - [x] Interact with the user
 - [x] Automatically download videos from URL provided via message
-    - [ ] Code cleanup
+    - [x] Code cleanup
     - [ ] Audio Quality selectable
     - [ ] Audio Format selectable
     - [ ] Audio Quality Default Value selectable
