@@ -49,7 +49,7 @@ CALLBACK_MP3 = "mp3"
 CALLBACK_OVERCAST = "overcast"
 CALLBACK_GOOGLE_DRIVE = "drive"
 CALLBACK_BEST_FORMAT = "best"
-CALLBACK_SELECT_FORMAT = "select"
+CALLBACK_SELECT_FORMAT = "select_format"
 
 
 def is_supported(url):
@@ -81,8 +81,8 @@ def start(update, context):
         keyboard = [
             [
                 InlineKeyboardButton(
-                    "Download Best Format", callback_data="best"),
-                InlineKeyboardButton("Select Format", callback_data="format"),
+                    "Download Best Format", callback_data=CALLBACK_BEST_FORMAT),
+                InlineKeyboardButton("Select Format", callback_data=CALLBACK_SELECT_FORMAT),
                 # InlineKeyboardButton("Abort", callback_data=str(ONE)),
             ]
         ]
@@ -122,7 +122,7 @@ def selectFormat(update, context):
     formats = sorted(formats, key=lambda k: k['ext'])
     button_list = []
     button_list.append(InlineKeyboardButton(
-        "Best Quality", callback_data="best"))
+        "Best Quality", callback_data=CALLBACK_BEST_FORMAT))
     for f in formats:
         # {'format_id': '243', 'url': '...', 'player_url': '...', 'ext': 'webm', 'height': 266, 'format_note': '360p',
         # 'vcodec': 'vp9', 'asr': None, 'filesize': 2663114, 'fps': 24, 'tbr': 267.658, 'width': 640, 'acodec': 'none',
@@ -145,7 +145,7 @@ def output(update, context):
     """Show new choice of buttons"""
     logger.info("output()")
     query = update.callback_query
-    context.user_data["format"] = query.data
+    context.user_data[CALLBACK_SELECT_FORMAT] = query.data
     query.answer()
     keyboard = [
         [
@@ -189,7 +189,7 @@ def download(update, context):
     # query.edit_message_text(text=context.user_data)
     query.edit_message_text(text="Downloading..")
     url = context.user_data["url"]
-    selected_format = context.user_data["format"]
+    selected_format = context.user_data[CALLBACK_SELECT_FORMAT]
     logger.info(url)
     # get url from context
     # some default configurations for video downloads
@@ -255,7 +255,7 @@ def main():
 
             OUTPUT: [
                 CallbackQueryHandler(
-                    selectFormat, pattern='^' + "format" + '$'),
+                    selectFormat, pattern="^%s$"%CALLBACK_SELECT_FORMAT),
                 CallbackQueryHandler(output),
             ],
             STORAGE: [
