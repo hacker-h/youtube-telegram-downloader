@@ -155,7 +155,7 @@ def output(update, context):
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     query.edit_message_text(
-        text="Do you want the full Video or just Audio?", reply_markup=reply_markup
+        text="Do you want the full video or just audio?", reply_markup=reply_markup
     )
     return STORAGE
 
@@ -193,24 +193,24 @@ def download(update, context):
     logger.info(url)
     # get url from context
     # some default configurations for video downloads
-    extension = 'mp3'
-    ydl_opts = {
+    MP3_EXTENSION = 'mp3'
+    YOUTUBE_DL_OPTIONS = {
         'format': selected_format,
         'restrictfilenames': True,
         'outtmpl': '%(title)s.%(ext)s',
         'postprocessors': [{
             'key': 'FFmpegExtractAudio',
-            'preferredcodec': extension,
+            'preferredcodec': MP3_EXTENSION,
             'preferredquality': '192',
         }],
     }
 
-    with youtube_dl.YoutubeDL(ydl_opts) as ydl:
+    with youtube_dl.YoutubeDL(YOUTUBE_DL_OPTIONS) as ydl:
         result = ydl.extract_info("{}".format(url))
         original_video_name = ydl.prepare_filename(result)
 
     raw_media_name = os.path.splitext(original_video_name)[0]
-    final_media_name = "%s.%s" % (raw_media_name, extension)
+    final_media_name = "%s.%s" % (raw_media_name, MP3_EXTENSION)
 
     # upload the file
     backend_name = context.user_data["storage"]
