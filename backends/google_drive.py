@@ -1,41 +1,54 @@
 from pydrive2.auth import GoogleAuth
 from pydrive2.drive import GoogleDrive
 import hashlib
+import logging
 import os
 
 
 from backends.storage_interface import StorageInterface
 
 
-def md5(fname):
-    hash_md5 = hashlib.md5()
-    with open(fname, "rb") as f:
-        for chunk in iter(lambda: f.read(4096), b""):
-            hash_md5.update(chunk)
-    return hash_md5.hexdigest()
+def md5(file_name):
+    """
+    Returns the md5 check sum of a file.
+    """
+    file_hash = hashlib.md5()
+    with open(file_name, "rb") as file_handle:
+        # read file in chunks (memory efficient, works also for big files)
+        while file_chunk := file_handle.read(4096):
+            file_hash.update(file_chunk)
+    return file_hash.hexdigest()
 
 
 class GoogleDriveStorage(StorageInterface):
 
     def __init__(self, path="testDir"):
         """
-        Path to root folder, that will contain downloaded files
+        Initialize logging and Google Drive authentication.
         """
+
+        # Enable logging
+        logging.basicConfig(
+            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO
+        )
+
+        self.logger = logging.getLogger(__name__)
+
         self.path = path
+
         gauth = GoogleAuth()
         gauth.LocalWebserverAuth()
         self.drive = GoogleDrive(gauth)
 
     def file_exists(self, filename, parent_folder_id):
         file_list = self.drive.ListFile({'q': 'trashed=false'}).GetList()
-        file = None
-        for file in file_list:
-            parents = file['parents'][0]
+        for item in file_list:
+            parents = item['parents'][0]
             parent_id = parents['id']
             if parent_id == parent_folder_id:
-                if file['title'] == filename:
-                    return file
-        return file
+                if item['title'] == filename:
+                    return item
+        return None
 
     def get_root_folder_id(self, parent_folder_name):
         file_list = self.drive.ListFile(
@@ -56,14 +69,13 @@ class GoogleDriveStorage(StorageInterface):
     def upload(self, local_file_name):
 
         dir_name = 'testDir'
-        # file_name = 'requirements.txt'
 
         # check whether the file already exists
         folder_id = self.get_root_folder_id(dir_name)
 
         file = self.file_exists(local_file_name, folder_id)
         if file is None:
-            print("uploading new file")
+            logging.info("uploading new file")
             f = self.drive.CreateFile(
                 {"parents": [{"kind": "drive#fileLink", "id": folder_id}]})
             f.SetContentFile(local_file_name)
@@ -75,10 +87,10 @@ class GoogleDriveStorage(StorageInterface):
             # check if md5sums differ => update the remote file
             local_md5 = md5(local_file_name)
             if file_md5 == local_md5:
-                print("file is already up to date")
+                logging.info("file is already up to date")
             else:
-                print("updating existing file..")
+                logging.info("updating existing file..")
                 # update remote file instead of uploading a copy
                 file.SetContentFile(local_file_name)
                 file.Upload()
-                print("remote file updated")
+                logging.info("remote file updated")
