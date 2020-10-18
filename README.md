@@ -68,8 +68,12 @@ More to be added according to the implemented features..
     - [ ] Audio Format selectable
     - [ ] Audio Quality Default Value selectable
     - [ ] Audio Format Default Value selectable
-- [ ] Automatically upload downloaded video to a remote backend
-    - [ ] Google Drive
+    - [ ] Handle Video Playlists
+    - [ ] Handle multiple URLs in one message
+    - [ ] Use multiple threads for more performance
+- [x] Automatically upload downloaded video to a remote backend
+    - [x] Google Drive
+        - [ ] remote directory path is configurable
     - [ ] [Overcast](https://overcast.fm/)
 - [ ] Secure your bot against unauthorized access
 - [x] Bot can be run as a Container Image

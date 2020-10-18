@@ -4,7 +4,6 @@ import hashlib
 import logging
 import os
 
-
 from backends.storage_interface import StorageInterface
 
 
@@ -40,13 +39,17 @@ class GoogleDriveStorage(StorageInterface):
         gauth.LocalWebserverAuth()
         self.drive = GoogleDrive(gauth)
 
-    def file_exists(self, filename, parent_folder_id):
+    def file_exists(self, file_name, parent_folder_id):
+        """
+        Checks whether a file exists in the respective parent folder.\n
+        Returns its GoogleDriveFile object, otherwise None.
+        """
         file_list = self.drive.ListFile({'q': 'trashed=false'}).GetList()
         for item in file_list:
             parents = item['parents'][0]
             parent_id = parents['id']
             if parent_id == parent_folder_id:
-                if item['title'] == filename:
+                if item['title'] == file_name:
                     return item
         return None
 
@@ -67,6 +70,8 @@ class GoogleDriveStorage(StorageInterface):
         return folder_id
 
     def upload(self, local_file_name):
+
+        # TODO make directory name configurable
 
         dir_name = 'testDir'
 
@@ -94,3 +99,11 @@ class GoogleDriveStorage(StorageInterface):
                 file.SetContentFile(local_file_name)
                 file.Upload()
                 logging.info("remote file updated")
+
+    def upload_multiple(self, files):
+        """
+        Sequentially uploads multiple files to your Google Drive backend.
+        """
+        # TODO use multiple threads to do this concurrently
+        for file in files:
+            self.upload(file)
