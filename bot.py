@@ -19,6 +19,7 @@ import logging
 import os
 import youtube_dl 
 from hurry.filesize import size
+from backends import google_drive
 
 # Enable logging
 logging.basicConfig(
@@ -43,6 +44,13 @@ if BOT_TOKEN is None:
 OUTPUT, STORAGE, DOWNLOAD = range(3)
 # Callback data
 MP4, MP3, OVERCAST, DRIVE = ["MP4", "MP3", "OVERCAST", "DRIVE"]
+
+CALLBACK_MP4 = "mp4"
+CALLBACK_MP3 = "mp3"
+CALLBACK_OVERCAST = "overcast"
+CALLBACK_GOOGLE_DRIVE = "drive"
+CALLBACK_BEST_FORMAT = "best"
+CALLBACK_SELECT_FORMAT = "select"
 
 def is_supported(url):
     extractors = youtube_dl.extractor.gen_extractors()
@@ -154,8 +162,8 @@ def storage(update, context):
     query.answer()
     keyboard = [
         [
-            InlineKeyboardButton("Overcast", callback_data=str(OVERCAST)),
-            InlineKeyboardButton("Google Drive", callback_data=str(DRIVE)),
+            InlineKeyboardButton("Google Drive", callback_data=CALLBACK_GOOGLE_DRIVE),
+            InlineKeyboardButton("Overcast", callback_data=CALLBACK_OVERCAST),
         ]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -191,7 +199,24 @@ def download(update, context):
 
     with youtube_dl.YoutubeDL(ydl_opts) as ydl:
         result = ydl.extract_info("{}".format(url))
-        raw_name = ydl.prepare_filename(result)
+        original_video_name = ydl.prepare_filename(result)
+
+    raw_media_name = os.path.splitext(original_video_name)[0]
+    final_media_name = "%s.%s" %(raw_media_name, extension)
+
+
+    # upload the file
+    backend_name = context.user_data["storage"]
+    backend = None
+    if backend_name == CALLBACK_GOOGLE_DRIVE:
+        backend = google_drive.GoogleDriveStorage()
+    elif backend_name == CALLBACK_OVERCAST:
+        raise NotImplementedError
+    else:
+        logger.error("Invalid backend '%s'", backend)
+
+    print(final_media_name)
+    backend.upload(final_media_name)
 
     query = update.callback_query
     query.answer()
