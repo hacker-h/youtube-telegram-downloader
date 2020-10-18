@@ -1,5 +1,5 @@
-from pydrive.auth import GoogleAuth
-from pydrive.drive import GoogleDrive
+from pydrive2.auth import GoogleAuth
+from pydrive2.drive import GoogleDrive
 import hashlib
 import os
 
@@ -14,11 +14,14 @@ class GoogleDriveStorage(StorageInterface):
         Path to root folder, that will contain downloaded files
         """
         self.path = path
+        gauth = GoogleAuth()
+        gauth.LocalWebserverAuth()
+        self.drive = GoogleDrive(gauth)
 
-    def file_exists(self, drive, filename, parent_folder_id):
+    def file_exists(self, filename, parent_folder_id):
         existing_id = None
         existing_md5 = None
-        file_list = drive.ListFile({'q': 'trashed=false'}).GetList()
+        file_list = self.drive.ListFile({'q': 'trashed=false'}).GetList()
         for file in file_list:
             parents = file['parents'][0]
             parent_id = parents['id']
@@ -29,8 +32,8 @@ class GoogleDriveStorage(StorageInterface):
                     break
         return existing_id, existing_md5
 
-    def get_root_folder_id(self, drive, parent_folder_name):
-        file_list = drive.ListFile(
+    def get_root_folder_id(self, parent_folder_name):
+        file_list = self.drive.ListFile(
             {'q': "'root' in parents and trashed=false"}).GetList()
         for folder in file_list:
             if folder['title'] == parent_folder_name:
@@ -39,31 +42,24 @@ class GoogleDriveStorage(StorageInterface):
 
         # create root folder if not existing
         if folder_id is None:
-            folder = drive.CreateFile({'title': parent_folder_name,
-                                       "mimeType": "application/vnd.google-apps.folder"})
+            folder = self.drive.CreateFile({'title': parent_folder_name,
+                                            "mimeType": "application/vnd.google-apps.folder"})
             folder.Upload()
             folder_id = folder['id']
         return folder_id
 
     def upload(self, filename):
-        gauth = GoogleAuth()
-
-        drive = GoogleDrive(gauth)
 
         dir_name = 'testDir'
         # filename = 'requirements.txt'
 
-        gauth = GoogleAuth()
-        gauth.LocalWebserverAuth()
-        drive = GoogleDrive(gauth)
-
         # check whether the file already exists
-        folder_id = self.get_root_folder_id(drive, dir_name)
+        folder_id = self.get_root_folder_id(dir_name)
 
-        file_id, file_md5 = self.file_exists(drive, filename, folder_id)
+        file_id, file_md5 = self.file_exists(filename, folder_id)
         if file_id is None:
             print("uploading new file")
-            f = drive.CreateFile(
+            f = self.drive.CreateFile(
                 {"parents": [{"kind": "drive#fileLink", "id": folder_id}]})
             f.SetContentFile(filename)
             f.Upload()
