@@ -155,7 +155,7 @@ def output(update, context):
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     query.edit_message_text(
-        text="Do you want to download as Video or Audio", reply_markup=reply_markup
+        text="Do you want the full Video or just Audio?", reply_markup=reply_markup
     )
     return STORAGE
 
@@ -175,7 +175,7 @@ def storage(update, context):
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     query.edit_message_text(
-        text="Where Do you Wnat do download", reply_markup=reply_markup
+        text="Where shall I upload the file?", reply_markup=reply_markup
     )
     return DOWNLOAD
 
@@ -186,7 +186,8 @@ def download(update, context):
     query = update.callback_query
     context.user_data["storage"] = query.data
     # print all settings
-    query.edit_message_text(text=context.user_data)
+    # query.edit_message_text(text=context.user_data)
+    query.edit_message_text(text="Downloading..")
     url = context.user_data["url"]
     selected_format = context.user_data["format"]
     logger.info(url)
@@ -220,6 +221,10 @@ def download(update, context):
         raise NotImplementedError
     else:
         logger.error("Invalid backend '%s'", backend)
+
+    query = update.callback_query
+    query.answer()
+    query.edit_message_text(text="Uploading..")
 
     print(final_media_name)
     backend.upload(final_media_name)
