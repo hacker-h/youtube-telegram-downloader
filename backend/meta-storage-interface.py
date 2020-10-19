@@ -13,13 +13,13 @@ class MetaStorageInterface(ABC):
     
     
     @abstractmethod
-    def upload(self, file):
+    def upload(self, filepath): 
         """
         Upload a single file
         """
         raise NotImplementedError
     
-    def upload_multiple(self, files):
+    def upload_multiple(self, dirpath):
         """
         Upload multiple files 
         """
