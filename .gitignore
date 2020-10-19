@@ -1,7 +1,18 @@
+# ignore IDE config
+.vscode
+
 # ignore environment files
 *.env
+
+# ignore secrets
+client_secrets.json
+credentials.json
+settings.yaml
 
 # ignore downloaded media files
 *.mp3
 *.mp4
 *.webm
+
+# ignore python overhead
+backends/__pycache__
