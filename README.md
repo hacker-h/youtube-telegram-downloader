@@ -18,6 +18,15 @@ Install the [Telegram Messenger](https://telegram.org/) on a system of your choi
 
 ### Google Drive
 Follow the instructions on [setting up PyDrive Authentication](https://pythonhosted.org/PyDrive/quickstart.html#authentication).
+Insert `client_id` and `client_secret` into the settings.yaml template:
+```
+# since this step is annoying to do manually, you can simply run this short shell script to do it
+cp settings.yaml.example settings.yaml &&\
+CLIENT_ID=$(cat client_secrets.json | grep client_id | cut -d'"' -f4)
+CLIENT_SECRET=$(cat client_secrets.json | grep client_secret | cut -d'"' -f4)
+sed -i "s/YOUR_CLIENT_ID/${CLIENT_ID}/g" settings.yaml &&\
+sed -i "s/YOUR_CLIENT_SECRET/${CLIENT_SECRET}/g" settings.yaml
+```
 
 ## Run the Telegram bot
 
@@ -51,13 +60,13 @@ python3 ./bot.py
 
 2. Send the bot a link to a video you want to be downloaded, e.g. a Youtube URL.
 
-3. Confirm the video the bot found on this URL by clicking `Download`.
+3. Choose Audio and Best Quality.
 
-4. Watch the bot downloading your video.
+4. Choose Google Drive.
 
-5. The bot converts the video to MP3 in highest quality available and confirms the accomplishment of this task with `Done!`.
+5. Watch the bot downloading, converting and uploading your video.
 
-More to be added according to the implemented features..
+To be updated according to the implemented features..
 
 ## Features
 
