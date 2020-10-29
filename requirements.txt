@@ -11,7 +11,7 @@ colorama==0.4.4
 contextlib2==0.6.0.post1
 cryptography==3.2.1
 decorator==4.4.2
-distlib==0.3.0
+distlib==0.3.1
 distro==1.4.0
 google-api-core==1.22.4
 google-api-python-client==1.12.3
