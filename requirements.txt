@@ -1,4 +1,4 @@
-appdirs==1.4.3
+appdirs==1.4.4
 APScheduler==3.6.3
 astroid==2.4.2
 autopep8==1.5.4
