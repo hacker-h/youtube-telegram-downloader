@@ -54,7 +54,7 @@ toml==0.10.1
 tornado==6.0.4
 tzlocal==2.1
 uritemplate==3.0.1
-urllib3==1.25.8
+urllib3==1.25.11
 webencodings==0.5.1
 wrapt==1.12.1
 youtube-dl==2020.9.20
