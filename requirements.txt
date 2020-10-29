@@ -24,7 +24,7 @@ hurry.filesize==0.9
 idna==2.10
 ipaddr==2.2.0
 isort==5.6.4
-lazy-object-proxy==1.4.3
+lazy-object-proxy==1.5.1
 lockfile==0.12.2
 mccabe==0.6.1
 msgpack==1.0.0
