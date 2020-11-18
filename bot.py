@@ -14,6 +14,7 @@ import os
 import youtube_dl
 from hurry.filesize import size
 from backends import google_drive
+from backends import overcast_storage
 
 # Enable logging
 logging.basicConfig(
@@ -231,23 +232,23 @@ def download_media(update, context):
     if backend_name == CALLBACK_GOOGLE_DRIVE:
         backend = google_drive.GoogleDriveStorage()
     elif backend_name == CALLBACK_OVERCAST:
-        raise NotImplementedError
+        backend = overcast_storage.OvercastStorage()
     else:
         logger.error("Invalid backend '%s'", backend)
 
     # upload the media file
-    query = update.callback_query
-    query.answer()
-    query.edit_message_text(text="Uploading..")
+    #query = update.callback_query
+    #query.answer()
+    #query.edit_message_text(text="Uploading..")
     logger.info("Uploading the file..")
     backend.upload(final_media_name)
-    logger.info("Upload finished.")
+    #logger.info("Upload finished.")
 
     # finish conversation
-    query = update.callback_query
-    query.answer()
-    query.edit_message_text(text="Done!")
-    logger.info("Done!")
+    #query = update.callback_query
+    #query.answer()
+    #query.edit_message_text(text="Done!")
+    #logger.info("Done!")
     return ConversationHandler.END
 
 
