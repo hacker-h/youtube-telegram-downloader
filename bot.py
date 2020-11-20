@@ -13,8 +13,7 @@ import logging
 import os
 import youtube_dl
 from hurry.filesize import size
-from backends import google_drive
-from backends import overcast_storage
+from task import TaskData, DownloadTask
 
 # Enable logging
 logging.basicConfig(
@@ -68,6 +67,7 @@ def start(update, context):
 
     # update global URL object
     url = update.message.text
+    
 
     # save url to user context
     context.user_data["url"] = url
@@ -123,7 +123,7 @@ def select_source_format(update, context):
     ydl_opts = {}
     with youtube_dl.YoutubeDL(ydl_opts) as ydl:
         meta = ydl.extract_info(
-            url, download_media=False)
+            url, download=False)
         formats = meta.get('formats', [meta])
 
     # dynamically build a format menu
@@ -198,57 +198,15 @@ def download_media(update, context):
     Afterwards the file will be uploaded to the specified storage backend.
     """
     query = update.callback_query
-    context.user_data["storage"] = query.data
-    logger.info("All settings: %s", context.user_data)
-
-    query.edit_message_text(text="Downloading..")
-    url = context.user_data["url"]
-    logger.info("Video URL to download: '%s'", url)
     selected_format = context.user_data[CALLBACK_SELECT_FORMAT]
+    url = context.user_data["url"]
+    storage = query.data
 
-    # some default configurations for video downloads
-    MP3_EXTENSION = 'mp3'
-    YOUTUBE_DL_OPTIONS = {
-        'format': selected_format,
-        'restrictfilenames': True,
-        'outtmpl': '%(title)s.%(ext)s',
-        'postprocessors': [{
-            'key': 'FFmpegExtractAudio',
-            'preferredcodec': MP3_EXTENSION,
-            'preferredquality': '192',
-        }],
-    }
+    data = TaskData(url, storage,selected_format,update)
 
-    with youtube_dl.YoutubeDL(YOUTUBE_DL_OPTIONS) as ydl:
-        result = ydl.extract_info("{}".format(url))
-        original_video_name = ydl.prepare_filename(result)
+    task = DownloadTask()
+    task.downloadVideo(data)
 
-    raw_media_name = os.path.splitext(original_video_name)[0]
-    final_media_name = "%s.%s" % (raw_media_name, MP3_EXTENSION)
-
-    # upload the file
-    backend_name = context.user_data["storage"]
-    backend = None
-    if backend_name == CALLBACK_GOOGLE_DRIVE:
-        backend = google_drive.GoogleDriveStorage()
-    elif backend_name == CALLBACK_OVERCAST:
-        backend = overcast_storage.OvercastStorage()
-    else:
-        logger.error("Invalid backend '%s'", backend)
-
-    # upload the media file
-    #query = update.callback_query
-    #query.answer()
-    #query.edit_message_text(text="Uploading..")
-    logger.info("Uploading the file..")
-    backend.upload(final_media_name)
-    #logger.info("Upload finished.")
-
-    # finish conversation
-    #query = update.callback_query
-    #query.answer()
-    #query.edit_message_text(text="Done!")
-    #logger.info("Done!")
     return ConversationHandler.END
 
 
