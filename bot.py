@@ -201,11 +201,10 @@ def download_media(update, context):
     selected_format = context.user_data[CALLBACK_SELECT_FORMAT]
     url = context.user_data["url"]
     storage = query.data
-
+    query.edit_message_text(text=f"Thank you for your order!🧑‍🍳\nI will start cooking following recipe🧾\n\nurl: {url} \nstorage: {storage} \nformat: {selected_format}\n😋😋😋😋",disable_web_page_preview=True)
     data = TaskData(url, storage,selected_format,update)
-
-    task = DownloadTask()
-    task.downloadVideo(data)
+    task = DownloadTask(data)
+    task.downloadVideo()
 
     return ConversationHandler.END
 
