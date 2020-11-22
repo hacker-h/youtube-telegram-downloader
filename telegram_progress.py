@@ -1,15 +1,15 @@
+from typing import Text
 import telegram
 from tqdm import tqdm
 from datetime import datetime
 
 
 class _TelegramIO():
-    def __init__(self, token, chat_id, show_last_update=True):
+    def __init__(self, token, chat_id, message_id):
         self.bot = telegram.Bot(token)
         self.chat_id = chat_id
         self.text = self.prev_text = '<< Init tg_tqdm bar >>'
-        self.message_id = self.bot.sendMessage(chat_id, self.text)['message_id']
-        self.show_last_update = show_last_update
+        self.message_id = message_id
         print(self.message_id)
 
     def write(self, s):
@@ -19,11 +19,11 @@ class _TelegramIO():
 
     def flush(self):
         if self.prev_text != self.text:
-            self.bot.edit_message_text(self.text +
-                                         '\nLast update: {}'.format(datetime.now()) if self.show_last_update else '', self.chat_id, self.message_id)
+            self.bot.edit_message_text(self.text , self.chat_id, self.message_id)
+            self.prev_text = self.text
+            
 
-
-def tg_tqdm(token, chat_id, show_last_update=True,
+def tg_tqdm(token, chat_id, message_id,
             desc=None, total=None, leave=True, ncols=None, mininterval=1.0, maxinterval=10.0,
             miniters=None, ascii=False, disable=False, unit='it',
             unit_scale=False, dynamic_ncols=False, smoothing=0.3,
@@ -52,7 +52,7 @@ def tg_tqdm(token, chat_id, show_last_update=True,
             Like in tqdm
             
     """
-    tg_io = _TelegramIO(token, chat_id, show_last_update)
+    tg_io = _TelegramIO(token, chat_id, message_id)
     return tqdm(desc=desc,
                 total=total,
                 leave=leave,
