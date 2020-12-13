@@ -32,12 +32,14 @@ if BOT_TOKEN is None:
     logger.error("BOT_TOKEN is not set, exiting.")
     exit(1)
 
-TRUSTED_USER_IDS = os.getenv('TRUSTED_USER_IDS', 'anybody')
-
-if TRUSTED_USER_IDS is None:
+# parse trusted user ids
+TRUST_ANYBODY = 'anybody'
+_TRUSTED_USER_IDS = os.getenv('TRUSTED_USER_IDS', '')
+TRUSTED_USER_IDS = _TRUSTED_USER_IDS.split(',')
+# trust anybody if unset
+if TRUSTED_USER_IDS is [] or TRUSTED_USER_IDS == [""]:
+    TRUSTED_USER_IDS = TRUST_ANYBODY
     logger.info("TRUSTED_USER_IDS was not set, bot will trust anybody.")
-else:
-    TRUSTED_USER_IDS = TRUSTED_USER_IDS.split(',')
 
 # Stages
 OUTPUT, STORAGE, DOWNLOAD = range(3)
@@ -69,7 +71,7 @@ def is_trusted(user_id):
     if type(user_id) == int:
         user_id = str(user_id)
 
-    if TRUSTED_USER_IDS == 'anybody':
+    if TRUSTED_USER_IDS == TRUST_ANYBODY:
         # bot trusts anybody
         return True
 
@@ -94,7 +96,7 @@ def start(update, context):
     if not is_trusted(user.id):
         logger.info(
             "Ignoring request of untrusted user '%s' with id '%s'", user.first_name, user.id)
-        logger.info(TRUSTED_USER_IDS)
+        logger.debug("I only trust these user ids: %s", str(TRUSTED_USER_IDS))
         return None
     # retrieve content of message
     message_text = update.message.text
