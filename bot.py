@@ -44,6 +44,8 @@ CALLBACK_BEST_FORMAT = "best"
 CALLBACK_SELECT_FORMAT = "select_format"
 CALLBACK_ABORT = "abort"
 
+#TODO add whoami command
+#TODO add config variable to limit bot access => everybody or list of IDs => CSV (dedicated file?)
 
 def is_supported(url):
     """
