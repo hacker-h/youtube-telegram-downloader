@@ -32,6 +32,15 @@ if BOT_TOKEN is None:
     logger.error("BOT_TOKEN is not set, exiting.")
     exit(1)
 
+# parse trusted user ids
+TRUST_ANYBODY = 'anybody'
+_TRUSTED_USER_IDS = os.getenv('TRUSTED_USER_IDS', '')
+TRUSTED_USER_IDS = _TRUSTED_USER_IDS.split(',')
+# trust anybody if unset
+if TRUSTED_USER_IDS is [] or TRUSTED_USER_IDS == [""]:
+    TRUSTED_USER_IDS = TRUST_ANYBODY
+    logger.info("TRUSTED_USER_IDS was not set, bot will trust anybody.")
+
 # Stages
 OUTPUT, STORAGE, DOWNLOAD = range(3)
 
@@ -57,17 +66,48 @@ def is_supported(url):
     return False
 
 
+def is_trusted(user_id):
+    # convert to string if necessary
+    if type(user_id) == int:
+        user_id = str(user_id)
+
+    if TRUSTED_USER_IDS == TRUST_ANYBODY:
+        # bot trusts anybody
+        return True
+
+    # bot trusts only defined user ids
+    return user_id in TRUSTED_USER_IDS
+
+
+def whoami(update, context):
+    # reply user
+    user = update.message.from_user
+    if is_trusted(user.id):
+        update.message.reply_text(user.id)
+
+
 def start(update, context):
     """
     Invoked on every user message to create an interactive inline conversation.
     """
 
-    # Get user that sent /start and log his name
+    # Get user who sent the message
     user = update.message.from_user
+    if not is_trusted(user.id):
+        logger.info(
+            "Ignoring request of untrusted user '%s' with id '%s'", user.first_name, user.id)
+        logger.debug("I only trust these user ids: %s", str(TRUSTED_USER_IDS))
+        return None
+    # retrieve content of message
+    message_text = update.message.text
+
+    # also handle whoami command as plain string
+    if message_text == "whoami":
+        whoami(update, context)
+        return ConversationHandler.END
 
     # update global URL object
-    url = update.message.text
-
+    url = message_text
     # save url to user context
     context.user_data["url"] = url
     logger.info("User %s started the conversation with '%s'.",
@@ -285,9 +325,12 @@ def main():
         fallbacks=[CommandHandler('start', start)],
     )
 
-    # Add ConversationHandler to dispatcher that will be used for handling
-    # updates
+    # Add ConversationHandler to dispatcher that will be used for
+    # handling updates
     dp.add_handler(conv_handler)
+
+    # handle whoami command (with leading slash)
+    dp.add_handler(CommandHandler("whoami", whoami))
 
     # Start the Bot
     updater.start_polling()

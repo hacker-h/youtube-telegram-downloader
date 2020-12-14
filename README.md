@@ -54,17 +54,28 @@ pip3 install -r ./youtube-telegram-downloader/requirements.txt &&\
 python3 ./bot.py
 ```
 
+## Secure your bot against unauthorized access
+By default the bot trusts anybody sending messages to him hence `TRUSTED_USER_IDS` is unset (equivalent to absence of the environment variable).
+To adapt this behaviour you can obtain your user id from the bot with the `whoami` command or 'whoami' as a plain text message.
+Now add `TRUSTED_USER_IDS` to your `bot.env` file and set it to your user id or a comma separated list(CSV) of multiple user ids, e.g.:
+```
+TRUSTED_USER_IDS=12345,13579,24680
+```
+Note that if `TRUSTED_USER_IDS` is set the bot will not reply to any users which's ids are not contained; this also concerns the `whoami` command.
+
 ## Usage
 
 1. Make sure that your bot is running as described in the previous steps.
 
 2. Send the bot a link to a video you want to be downloaded, e.g. a Youtube URL.
 
-3. Choose Audio and Best Quality.
+3. Choose `Download Best Format`.
 
-4. Choose Google Drive.
+4. Choose `Audio`.
 
-5. Watch the bot downloading, converting and uploading your video.
+5. Choose `Google Drive`.
+
+6. Watch the bot downloading, converting and uploading your video.
 
 To be updated according to the implemented features..
 
@@ -84,6 +95,6 @@ To be updated according to the implemented features..
     - [x] Google Drive
         - [ ] remote directory path is configurable
     - [ ] [Overcast](https://overcast.fm/)
-- [ ] Secure your bot against unauthorized access
+- [x] Secure your bot against unauthorized access
 - [x] Bot can be run as a Container Image
 - [ ] Container Image available on Docker Hub
