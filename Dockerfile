@@ -13,6 +13,7 @@ RUN apk add --no-cache ffmpeg && \
 USER 1000
 
 COPY ./bot.py /home/bot/bot.py
+COPY ./backends/ /home/bot/backends/
 COPY --from=builder /root/.local /home/bot/.local
 
 WORKDIR /home/bot/
