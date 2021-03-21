@@ -21,7 +21,7 @@ googleapis-common-protos==1.52.0
 html5lib==1.0.1
 httplib2==0.19.0
 hurry.filesize==0.9
-idna==2.10
+idna
 ipaddr==2.2.0
 isort==5.6.4
 lazy-object-proxy==1.4.3
@@ -59,4 +59,4 @@ uritemplate==3.0.1
 urllib3==1.25.11
 webencodings==0.5.1
 wrapt==1.12.1
-youtube-dl==2020.12.12
+youtube-dl
