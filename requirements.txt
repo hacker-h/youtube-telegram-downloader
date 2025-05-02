@@ -53,7 +53,7 @@ rope==0.18.0
 rsa==4.7
 six==1.14.0
 toml==0.10.1
-tornado==6.3.3
+tornado==6.4.2
 tzlocal==2.1
 uritemplate==3.0.1
 urllib3==1.26.5
