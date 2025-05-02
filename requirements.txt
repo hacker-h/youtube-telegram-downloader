@@ -4,7 +4,7 @@ astroid==2.4.2
 autopep8==1.5.4
 CacheControl==0.12.6
 cachetools==4.1.1
-certifi==2023.7.22
+certifi==2024.7.4
 cffi==1.14.3
 chardet==3.0.4
 colorama==0.4.4
