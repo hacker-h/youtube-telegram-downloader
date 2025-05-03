@@ -22,8 +22,8 @@ Insert `client_id` and `client_secret` into the settings.yaml template:
 ```
 # since this step is annoying to do manually, you can simply run this short shell script to do it
 cp settings.yaml.example settings.yaml &&\
-CLIENT_ID=$(cat client_secrets.json | grep client_id | cut -d'"' -f4)
-CLIENT_SECRET=$(cat client_secrets.json | grep client_secret | cut -d'"' -f4)
+CLIENT_ID=$(cat client_secrets.json | jq '.web.client_id' -r)
+CLIENT_SECRET=$(cat client_secrets.json | jq '.web.client_secret' -r)
 sed -i "s/YOUR_CLIENT_ID/${CLIENT_ID}/g" settings.yaml &&\
 sed -i "s/YOUR_CLIENT_SECRET/${CLIENT_SECRET}/g" settings.yaml
 ```
@@ -43,7 +43,7 @@ Install [ffmpeg](https://ffmpeg.org/) on your system and make sure it is availab
 
 Setup a python3 environment (e.g. with [virtualenv](https://virtualenv.pypa.io/en/stable/)) and source it.:
 ```
-virtualenv -p python3 ~/.venv/youtube-telegram-downloader &&\
+virtualenv -p python3.9 ~/.venv/youtube-telegram-downloader &&\
 source ~/.venv/youtube-telegram-downloader/bin/activate &&\
 
 # Clone the repository and install all dependencies:

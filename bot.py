@@ -11,7 +11,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import CallbackQueryHandler, ConversationHandler, CommandHandler, Filters, MessageHandler, Updater
 import logging
 import os
-import youtube_dl
+import yt_dlp
 from hurry.filesize import size
 from backends import google_drive
 
@@ -56,14 +56,15 @@ CALLBACK_ABORT = "abort"
 
 def is_supported(url):
     """
-    Checks whether the URL type is eligible for youtube_dl.\n
+    Checks whether the URL type is eligible for yt-dlp.\n
     Returns True or False.
     """
-    extractors = youtube_dl.extractor.gen_extractors()
-    for e in extractors:
-        if e.suitable(url) and e.IE_NAME != 'generic':
+    try:
+        with yt_dlp.YoutubeDL() as ydl:
+            ydl.extract_info(url, download=False)
             return True
-    return False
+    except yt_dlp.utils.DownloadError:
+        return False
 
 
 def is_trusted(user_id):
@@ -160,9 +161,8 @@ def select_source_format(update, context):
     # get formats
     url = context.user_data["url"]
     ydl_opts = {}
-    with youtube_dl.YoutubeDL(ydl_opts) as ydl:
-        meta = ydl.extract_info(
-            url, download_media=False)
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        meta = ydl.extract_info(url, download=False)
         formats = meta.get('formats', [meta])
 
     # dynamically build a format menu
@@ -198,139 +198,118 @@ def select_output_format(update, context):
     query.answer()
     keyboard = [
         [
-            InlineKeyboardButton("Audio", callback_data=CALLBACK_MP3),
-            InlineKeyboardButton("Video", callback_data=CALLBACK_MP4),
+            InlineKeyboardButton("MP4", callback_data=CALLBACK_MP4),
+            InlineKeyboardButton("MP3", callback_data=CALLBACK_MP3),
         ]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     query.edit_message_text(
-        text="Do you want the full video or just audio?", reply_markup=reply_markup
+        text="Choose Output Format", reply_markup=reply_markup
     )
     return STORAGE
 
 
 def select_storage(update, context):
     """
-    A stage asking the user for the storage backend to which the media file shall be uploaded.
+    A stage asking the user for the desired storage backend.
     """
     logger.info("storage()")
     query = update.callback_query
-    context.user_data["output"] = query.data
+    context.user_data["output_format"] = query.data
     query.answer()
     keyboard = [
         [
-            InlineKeyboardButton(
-                "Google Drive", callback_data=CALLBACK_GOOGLE_DRIVE),
-            InlineKeyboardButton("Overcast", callback_data=CALLBACK_OVERCAST),
+            InlineKeyboardButton("Google Drive", callback_data=CALLBACK_GOOGLE_DRIVE),
+            # InlineKeyboardButton("Overcast", callback_data=CALLBACK_OVERCAST),
         ]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     query.edit_message_text(
-        text="Where shall I upload the file?", reply_markup=reply_markup
+        text="Choose Storage Backend", reply_markup=reply_markup
     )
     return DOWNLOAD
 
 
 def download_media(update, context):
     """
-    A stage downloading the selected media and converting it to the desired output format.
-    Afterwards the file will be uploaded to the specified storage backend.
+    A stage downloading the media and uploading it to the selected storage backend.
     """
+    logger.info("download()")
     query = update.callback_query
-    context.user_data["storage"] = query.data
-    logger.info("All settings: %s", context.user_data)
-
-    query.edit_message_text(text="Downloading..")
+    query.answer()
+    storage_backend = query.data
+    output_format = context.user_data["output_format"]
     url = context.user_data["url"]
-    logger.info("Video URL to download: '%s'", url)
-    selected_format = context.user_data[CALLBACK_SELECT_FORMAT]
+    format_id = context.user_data.get(CALLBACK_SELECT_FORMAT, None)
 
-    # some default configurations for video downloads
-    MP3_EXTENSION = 'mp3'
-    YOUTUBE_DL_OPTIONS = {
-        'format': selected_format,
-        'restrictfilenames': True,
+    # Build youtube-dl options
+    YT_DLP_OPTIONS = {
+        'format': format_id if format_id else 'best',
         'outtmpl': '%(title)s.%(ext)s',
+        'quiet': True,
+        'no_warnings': True,
+        'extract_audio': output_format == CALLBACK_MP3,
+        'audio_format': 'mp3' if output_format == CALLBACK_MP3 else None,
         'postprocessors': [{
             'key': 'FFmpegExtractAudio',
-            'preferredcodec': MP3_EXTENSION,
+            'preferredcodec': 'mp3',
             'preferredquality': '192',
-        }],
+        }] if output_format == CALLBACK_MP3 else [],
     }
 
-    with youtube_dl.YoutubeDL(YOUTUBE_DL_OPTIONS) as ydl:
-        result = ydl.extract_info("{}".format(url))
-        original_video_name = ydl.prepare_filename(result)
+    # Download media
+    try:
+        with yt_dlp.YoutubeDL(YT_DLP_OPTIONS) as ydl:
+            info = ydl.extract_info(url, download=True)
+            filename = ydl.prepare_filename(info)
+            if output_format == CALLBACK_MP3:
+                filename = filename.rsplit('.', 1)[0] + '.mp3'
 
-    raw_media_name = os.path.splitext(original_video_name)[0]
-    final_media_name = "%s.%s" % (raw_media_name, MP3_EXTENSION)
+        # Upload to storage backend
+        if storage_backend == CALLBACK_GOOGLE_DRIVE:
+            google_drive.upload(filename)
+            query.edit_message_text(
+                text="Uploaded to Google Drive: %s" % filename)
+        else:
+            query.edit_message_text(
+                text="Unknown storage backend: %s" % storage_backend)
+    except Exception as e:
+        logger.error("Error downloading media: %s", str(e))
+        query.edit_message_text(
+            text="Error downloading media: %s" % str(e))
 
-    # upload the file
-    backend_name = context.user_data["storage"]
-    backend = None
-    if backend_name == CALLBACK_GOOGLE_DRIVE:
-        backend = google_drive.GoogleDriveStorage()
-    elif backend_name == CALLBACK_OVERCAST:
-        raise NotImplementedError
-    else:
-        logger.error("Invalid backend '%s'", backend)
-
-    # upload the media file
-    query = update.callback_query
-    query.answer()
-    query.edit_message_text(text="Uploading..")
-    logger.info("Uploading the file..")
-    backend.upload(final_media_name)
-    logger.info("Upload finished.")
-
-    # finish conversation
-    query = update.callback_query
-    query.answer()
-    query.edit_message_text(text="Done!")
-    logger.info("Done!")
     return ConversationHandler.END
 
 
 def main():
     # Create the Updater and pass it your bot's token.
-    updater = Updater(token=BOT_TOKEN, use_context=True)
+    updater = Updater(BOT_TOKEN)
 
     # Get the dispatcher to register handlers
     dp = updater.dispatcher
 
-    # Setup conversation handler with the states FIRST and SECOND
-    # Use the pattern parameter to pass CallbackQueries with specific
-    # data pattern to the corresponding handlers.
-    # ^ means "start of line/string"
-    # $ means "end of line/string"
-    # So ^ABC$ will only allow 'ABC'
+    # Add conversation handler with the states OUTPUT, STORAGE and DOWNLOAD
     conv_handler = ConversationHandler(
         entry_points=[MessageHandler(Filters.text & ~Filters.command, start)],
         states={
-
             OUTPUT: [
-                CallbackQueryHandler(
-                    select_source_format, pattern="^%s$" % CALLBACK_SELECT_FORMAT),
-                CallbackQueryHandler(select_output_format),
+                CallbackQueryHandler(select_source_format, pattern='^' + CALLBACK_SELECT_FORMAT + '$'),
+                CallbackQueryHandler(select_output_format, pattern='^' + CALLBACK_BEST_FORMAT + '$'),
+                CallbackQueryHandler(select_output_format, pattern='^[0-9]+$'),
             ],
             STORAGE: [
-                CallbackQueryHandler(select_storage)
+                CallbackQueryHandler(select_storage, pattern='^' + CALLBACK_MP3 + '$'),
+                CallbackQueryHandler(select_storage, pattern='^' + CALLBACK_MP4 + '$'),
             ],
             DOWNLOAD: [
-                CallbackQueryHandler(download_media),
-            ]
+                CallbackQueryHandler(download_media, pattern='^' + CALLBACK_GOOGLE_DRIVE + '$'),
+                CallbackQueryHandler(download_media, pattern='^' + CALLBACK_OVERCAST + '$'),
+            ],
         },
-        allow_reentry=False,
-        per_user=True,
-        fallbacks=[CommandHandler('start', start)],
+        fallbacks=[CommandHandler('whoami', whoami)],
     )
 
-    # Add ConversationHandler to dispatcher that will be used for
-    # handling updates
     dp.add_handler(conv_handler)
-
-    # handle whoami command (with leading slash)
-    dp.add_handler(CommandHandler("whoami", whoami))
 
     # Start the Bot
     updater.start_polling()
