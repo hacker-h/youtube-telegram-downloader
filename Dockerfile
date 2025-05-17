@@ -1,32 +1,36 @@
-FROM python:3.9-alpine3.12 as builder
+FROM python:3.9-slim
 
-# Install build dependencies
-RUN apk add --no-cache \
+# Install ffmpeg and build dependencies
+RUN apt-get update && apt-get install -y \
     ffmpeg \
     gcc \
-    g++ \
-    musl-dev \
-    python3-dev \
     libffi-dev \
-    openssl-dev \
-    cargo \
-    make \
-    && pip3 install --upgrade pip wheel setuptools
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
 
-COPY ./requirements.txt /tmp/requirements.txt
-RUN pip3 install --no-warn-script-location --user -r /tmp/requirements.txt &&\
-    adduser -S bot -s /bin/nologin -u 1000 &&\
-    chown -R 1000 /root/.local
+# Create user
+RUN useradd -m -s /bin/bash bot
 
-FROM python:3.9-alpine3.12 as runner
+# Copy application files
+WORKDIR /home/bot
+COPY ./requirements.txt ./
+COPY ./bot.py ./
+COPY ./task.py ./
+COPY ./telegram_progress.py ./
+COPY ./backends/ ./backends/
 
-RUN apk add --no-cache ffmpeg && \
-    adduser -S bot -s /bin/nologin -u 1000
-USER 1000
+# Install dependencies
+RUN pip3 install --no-warn-script-location python-telegram-bot==13.0 && \
+    pip3 install --no-warn-script-location beautifulsoup4 && \
+    pip3 install --no-warn-script-location python-dotenv && \
+    pip3 install --no-warn-script-location yt-dlp && \
+    pip3 install --no-warn-script-location tqdm && \
+    pip3 install --no-warn-script-location hurry.filesize && \
+    pip3 install --no-warn-script-location pydrive2 && \
+    pip3 install --no-warn-script-location requests
 
-COPY ./bot.py /home/bot/bot.py
-COPY ./backends/ /home/bot/backends/
-COPY --from=builder /root/.local /home/bot/.local
+# Set user
+USER bot
 
-WORKDIR /home/bot/
+# Run
 CMD ["python3", "./bot.py"]

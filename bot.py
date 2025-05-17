@@ -237,47 +237,6 @@ def download_media(update, context):
     """
     logger.info("download()")
     query = update.callback_query
-    # query.answer()
-    # storage_backend = query.data
-    # output_format = context.user_data["output_format"]
-    # url = context.user_data["url"]
-    # format_id = context.user_data.get(CALLBACK_SELECT_FORMAT, None)
-
-    # # Build youtube-dl options
-    # YT_DLP_OPTIONS = {
-    #     'format': format_id if format_id else 'best',
-    #     'outtmpl': '%(title)s.%(ext)s',
-    #     'quiet': True,
-    #     'no_warnings': True,
-    #     'extract_audio': output_format == CALLBACK_MP3,
-    #     'audio_format': 'mp3' if output_format == CALLBACK_MP3 else None,
-    #     'postprocessors': [{
-    #         'key': 'FFmpegExtractAudio',
-    #         'preferredcodec': 'mp3',
-    #         'preferredquality': '192',
-    #     }] if output_format == CALLBACK_MP3 else [],
-    # }
-
-    # # Download media
-    # try:
-    #     with yt_dlp.YoutubeDL(YT_DLP_OPTIONS) as ydl:
-    #         info = ydl.extract_info(url, download=True)
-    #         filename = ydl.prepare_filename(info)
-    #         if output_format == CALLBACK_MP3:
-    #             filename = filename.rsplit('.', 1)[0] + '.mp3'
-
-    #     # Upload to storage backend
-    #     if storage_backend == CALLBACK_GOOGLE_DRIVE:
-    #         google_drive.upload(filename)
-    #         query.edit_message_text(
-    #             text="Uploaded to Google Drive: %s" % filename)
-    #     else:
-    #         query.edit_message_text(
-    #             text="Unknown storage backend: %s" % storage_backend)
-    # except Exception as e:
-    #     logger.error("Error downloading media: %s", str(e))
-    #     query.edit_message_text(
-    #         text="Error downloading media: %s" % str(e))
     selected_format = context.user_data[CALLBACK_SELECT_FORMAT]
     url = context.user_data["url"]
     storage = query.data

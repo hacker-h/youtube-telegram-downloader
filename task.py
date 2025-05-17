@@ -5,13 +5,13 @@ import requests
 
 import telegram
 from telegram import update
-from backends import google_drive, overcast_storage
+from backends.google_drive import GoogleDriveStorage
+from backends.overcast_storage import OvercastStorage
 from telegram.ext import CallbackQueryHandler, ConversationHandler, CommandHandler, Filters, MessageHandler, Updater
 import logging
 import os
-import youtube_dl
+import yt_dlp
 from hurry.filesize import size
-from backends import google_drive, overcast_storage
 import telegram
 from telegram_progress import tg_tqdm
 from dotenv import load_dotenv
@@ -60,7 +60,7 @@ class DownloadTask:
         logger.info("Video URL to download: '%s'", self.data.url)
         print(self.data.update["callback_query"].message)    # some default configurations for video downloads
         MP3_EXTENSION = 'mp3'
-        YOUTUBE_DL_OPTIONS = {
+        YT_DLP_OPTIONS = {
             'format': self.data.selected_format,
             'restrictfilenames': True,
             'outtmpl': '%(title)s.%(ext)s',
@@ -72,7 +72,7 @@ class DownloadTask:
             'progress_hooks': [self.my_hook]
         }
 
-        with youtube_dl.YoutubeDL(YOUTUBE_DL_OPTIONS) as ydl:
+        with yt_dlp.YoutubeDL(YT_DLP_OPTIONS) as ydl:
             result = ydl.extract_info("{}".format(self.data.url))
             original_video_name = ydl.prepare_filename(result)
         
@@ -88,15 +88,15 @@ class DownloadTask:
         backend_name = self.data.storage
         backend = None
         if backend_name == CALLBACK_GOOGLE_DRIVE:
-            backend = google_drive.GoogleDriveStorage()
+            backend = GoogleDriveStorage()
         elif backend_name == CALLBACK_OVERCAST:
-            backend = overcast_storage.OvercastStorage()
+            backend = OvercastStorage()
         else:
             logger.error("Invalid backend '%s'", backend)
         
         logger.info("Uploading the file..")
         backend.upload(final_media_name)
-        self.bot.edit_message_text(f"Your food is ready!🎉 \n \nurl: {self.data.url}\nstorage: {self.data.storage}\nformat: {self.data.storage}", self.chat_id, message_id )
+        self.bot.edit_message_text(f"Your food is ready!🎉 \n \nurl: {self.data.url}\nstorage: {self.data.storage}\nformat: {self.data.selected_format}", self.chat_id, message_id )
         self.bot.delete_message(self.chat_id, self.old_message_id)
         
 
