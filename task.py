@@ -15,6 +15,14 @@ import telegram
 from dotenv import load_dotenv
 import time
 
+# Global download counter for session IDs
+download_counter = 0
+
+def get_next_session_id():
+    """Generate incremental session ID for downloads"""
+    global download_counter
+    download_counter += 1
+    return f"#{download_counter:04d}"
 
 CALLBACK_MP4 = "mp4"
 CALLBACK_MP3 = "mp3"
@@ -65,8 +73,8 @@ class DownloadTask:
         """
         try:
             # Send progress message with unique session identifier
-            session_id = str(int(time.time()))[-4:]  # Last 4 digits of timestamp
-            progress_msg = self.bot.send_message(self.chat_id, f"🔄 Starting download... (#{session_id})")
+            session_id = get_next_session_id()
+            progress_msg = self.bot.send_message(self.chat_id, f"🔄 Starting download... {session_id}")
             self.progress_message_id = progress_msg.message_id
             
             # Initialize progress bar
