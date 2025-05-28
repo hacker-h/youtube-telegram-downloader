@@ -41,14 +41,13 @@ if TRUSTED_USER_IDS is [] or TRUSTED_USER_IDS == [""]:
     TRUSTED_USER_IDS = TRUST_ANYBODY
     logger.info("TRUSTED_USER_IDS was not set, bot will trust anybody.")
 
-# Stages
-OUTPUT, STORAGE, DOWNLOAD = range(3)
+# Stages - removed STORAGE stage since we only have local storage
+OUTPUT, DOWNLOAD = range(2)
 
 # Callback data
 CALLBACK_MP4 = "mp4"
 CALLBACK_MP3 = "mp3"
-CALLBACK_OVERCAST = "overcast"
-CALLBACK_GOOGLE_DRIVE = "drive"
+CALLBACK_LOCAL = "local"
 CALLBACK_BEST_FORMAT = "best"
 CALLBACK_SELECT_FORMAT = "select_format"
 CALLBACK_ABORT = "abort"
@@ -192,6 +191,7 @@ def select_source_format(update, context):
 def select_output_format(update, context):
     """
     A stage asking the user for the desired output media format.
+    Now goes directly to download since we only have local storage.
     """
     logger.info("output()")
     query = update.callback_query
@@ -207,41 +207,23 @@ def select_output_format(update, context):
     query.edit_message_text(
         text="Choose Output Format", reply_markup=reply_markup
     )
-    return STORAGE
-
-
-def select_storage(update, context):
-    """
-    A stage asking the user for the desired storage backend.
-    """
-    logger.info("storage()")
-    query = update.callback_query
-    context.user_data["output_format"] = query.data
-    query.answer()
-    keyboard = [
-        [
-            InlineKeyboardButton("Google Drive", callback_data=CALLBACK_GOOGLE_DRIVE),
-            # InlineKeyboardButton("Overcast", callback_data=CALLBACK_OVERCAST),
-        ]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    query.edit_message_text(
-        text="Choose Storage Backend", reply_markup=reply_markup
-    )
     return DOWNLOAD
 
 
 def download_media(update, context):
     """
-    A stage downloading the media and uploading it to the selected storage backend.
+    A stage downloading the media and saving it to local storage.
     """
     logger.info("download()")
     query = update.callback_query
     selected_format = context.user_data[CALLBACK_SELECT_FORMAT]
     url = context.user_data["url"]
-    storage = query.data
-    query.edit_message_text(text=f"Thank you for your order!🧑‍🍳\nI will start cooking following recipe🧾\n\nurl: {url} \nstorage: {storage} \nformat: {selected_format}\n😋😋😋😋",disable_web_page_preview=True)
-    data = TaskData(url, storage,selected_format,update)
+    output_format = query.data
+    
+    query.edit_message_text(text=f"Thank you for your order!🧑‍🍳\nI will start cooking following recipe🧾\n\nurl: {url} \nformat: {selected_format}\noutput: {output_format}\n😋😋😋😋",disable_web_page_preview=True)
+    
+    # Always use local storage now
+    data = TaskData(url, CALLBACK_LOCAL, selected_format, update)
     task = DownloadTask(data)
     task.downloadVideo()
 
@@ -255,7 +237,7 @@ def main():
     # Get the dispatcher to register handlers
     dp = updater.dispatcher
 
-    # Add conversation handler with the states OUTPUT, STORAGE and DOWNLOAD
+    # Add conversation handler with simplified states (OUTPUT and DOWNLOAD only)
     conv_handler = ConversationHandler(
         entry_points=[MessageHandler(Filters.text & ~Filters.command, start)],
         states={
@@ -264,13 +246,9 @@ def main():
                 CallbackQueryHandler(select_output_format, pattern='^' + CALLBACK_BEST_FORMAT + '$'),
                 CallbackQueryHandler(select_output_format, pattern='^[0-9]+$'),
             ],
-            STORAGE: [
-                CallbackQueryHandler(select_storage, pattern='^' + CALLBACK_MP3 + '$'),
-                CallbackQueryHandler(select_storage, pattern='^' + CALLBACK_MP4 + '$'),
-            ],
             DOWNLOAD: [
-                CallbackQueryHandler(download_media, pattern='^' + CALLBACK_GOOGLE_DRIVE + '$'),
-                CallbackQueryHandler(download_media, pattern='^' + CALLBACK_OVERCAST + '$'),
+                CallbackQueryHandler(download_media, pattern='^' + CALLBACK_MP3 + '$'),
+                CallbackQueryHandler(download_media, pattern='^' + CALLBACK_MP4 + '$'),
             ],
         },
         fallbacks=[CommandHandler('whoami', whoami)],
@@ -282,7 +260,7 @@ def main():
     updater.start_polling()
 
     # Run the bot until you press Ctrl-C or the process receives SIGINT,
-    # SIGTERM or SIGABRT. This should be used most of the time, since
+    # SIGTERM or SIGABORT. This should be used most of the time, since
     # start_polling() is non-blocking and will stop the bot gracefully.
     updater.idle()
 

@@ -1,8 +1,7 @@
 # youtube-telegram-downloader
 
-This is a selfhosted [Telegram](https://telegram.org/) bot which is supposed to download any Videos or Streams compatible with [youtube-dl](https://github.com/ytdl-org/youtube-dl).
-The audiotrack of this video will be extracted and uploaded to one of your storage backends.
-
+This is a selfhosted [Telegram](https://telegram.org/) bot which downloads any videos or streams compatible with [yt-dlp](https://github.com/yt-dlp/yt-dlp).
+The audiotrack of this video will be extracted and saved to your local storage.
 
 # Getting Started
 
@@ -14,27 +13,23 @@ Insert the bot token you obtained during setup of your Telegram bot into the `bo
 
 Install the [Telegram Messenger](https://telegram.org/) on a system of your choice and search for your bot as a contact to create a conversation.
 
-## Setting up your backend
+## Setting up Local Storage
 
-### Google Drive
-Follow the instructions on [setting up PyDrive Authentication](https://pythonhosted.org/PyDrive/quickstart.html#authentication).
-Insert `client_id` and `client_secret` into the settings.yaml template:
-```
-# since this step is annoying to do manually, you can simply run this short shell script to do it
-cp settings.yaml.example settings.yaml &&\
-CLIENT_ID=$(cat client_secrets.json | jq '.web.client_id' -r)
-CLIENT_SECRET=$(cat client_secrets.json | jq '.web.client_secret' -r)
-sed -i "s/YOUR_CLIENT_ID/${CLIENT_ID}/g" settings.yaml &&\
-sed -i "s/YOUR_CLIENT_SECRET/${CLIENT_SECRET}/g" settings.yaml
-```
+The bot uses local storage to save downloaded files. By default, files are stored in the `/home/bot/data` directory inside the container, 
+which is mapped to the `./data` directory on your host system.
+
+You can configure the storage location by setting the `LOCAL_STORAGE_DIR` environment variable in your `bot.env` file or in the 
+`environment` section of the `docker-compose.yml` file.
 
 ## Run the Telegram bot
 
-### Option 1: as a Docker container
-Use the provided `docker-compose.yml` file, which automatically mounts your configs into the container:
+### Option 1: as a Docker container (Recommended)
+Use the provided `docker-compose.yml` file:
 ```
 git clone https://github.com/hacker-h/youtube-telegram-downloader.git &&\
 cd youtube-telegram-downloader &&\
+cp bot.env.default bot.env &&\
+# Edit bot.env to add your BOT_TOKEN
 docker-compose up -d
 ```
 
@@ -69,15 +64,27 @@ Note that if `TRUSTED_USER_IDS` is set the bot will not reply to any users which
 
 2. Send the bot a link to a video you want to be downloaded, e.g. a Youtube URL.
 
-3. Choose `Download Best Format`.
+3. Choose `Download Best Format` or `Select Format`.
 
-4. Choose `Audio`.
+4. Choose `MP3` for audio or `MP4` for video.
 
-5. Choose `Google Drive`.
+5. Watch the bot downloading, converting and saving your file to the local storage directory.
 
-6. Watch the bot downloading, converting and uploading your video.
+6. Access your downloaded files in the `./data` directory on your host system.
 
-To be updated according to the implemented features..
+## Configuration
+
+### Environment Variables
+
+- `BOT_TOKEN`: Your Telegram bot token (required)
+- `TRUSTED_USER_IDS`: Comma-separated list of user IDs allowed to use the bot (optional, defaults to allowing anyone)
+- `LOCAL_STORAGE_DIR`: Directory where downloaded files are stored (default: `/home/bot/data` in container, mapped to `./data` on host)
+
+### Docker Compose Configuration
+
+The `docker-compose.yml` file includes:
+- Volume mount for persistent storage: `./data:/home/bot/data`
+- Environment variable for storage directory: `LOCAL_STORAGE_DIR=/home/bot/data`
 
 ## Features
 
@@ -91,10 +98,10 @@ To be updated according to the implemented features..
     - [ ] Handle Video Playlists
     - [ ] Handle multiple URLs in one message
     - [ ] Use multiple threads for more performance
-- [x] Automatically upload downloaded video to a remote backend
-    - [x] Google Drive
-        - [ ] remote directory path is configurable
-    - [ ] [Overcast](https://overcast.fm/)
+- [x] Automatically save downloaded content to local storage
+    - [x] Local Storage
+        - [x] Storage directory is configurable
+    
 - [x] Secure your bot against unauthorized access
 - [x] Bot can be run as a Container Image
 - [ ] Container Image available on Docker Hub

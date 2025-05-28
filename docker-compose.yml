@@ -4,3 +4,8 @@ services:
         build: .
         env_file:
             - './bot.env'
+        environment:
+            - LOCAL_STORAGE_DIR=/home/bot/data
+        volumes:
+            - ./data:/home/bot/data
+        restart: unless-stopped

@@ -5,8 +5,7 @@ import requests
 
 import telegram
 from telegram import update
-from backends.google_drive import GoogleDriveStorage
-from backends.overcast_storage import OvercastStorage
+from backends.local_storage import LocalStorage
 from telegram.ext import CallbackQueryHandler, ConversationHandler, CommandHandler, Filters, MessageHandler, Updater
 import logging
 import os
@@ -19,11 +18,11 @@ from dotenv import load_dotenv
 
 CALLBACK_MP4 = "mp4"
 CALLBACK_MP3 = "mp3"
-CALLBACK_OVERCAST = "overcast"
-CALLBACK_GOOGLE_DRIVE = "drive"
+CALLBACK_LOCAL = "local"
 CALLBACK_BEST_FORMAT = "best"
 CALLBACK_SELECT_FORMAT = "select_format"
 CALLBACK_ABORT = "abort"
+
 # Enable logging
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO
@@ -32,6 +31,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 load_dotenv(dotenv_path='./bot.env')
 BOT_TOKEN = os.getenv('BOT_TOKEN', None)
+
 class TaskData:
     def __init__(self, url, storage, selected_format, update) -> None:
         self.url = url
@@ -49,21 +49,25 @@ class DownloadTask:
 
     def downloadVideo(self):
         """
-        A stage downloading the selected media and converting it to the desired output format.
-        Afterwards the file will be uploaded to the specified storage backend.
+        Download the selected media, convert it to the desired output format,
+        and save it to local storage.
         """
         message_id = self.bot.send_message(self.chat_id, "Start Downloading").message_id
         self.pbar = tg_tqdm(BOT_TOKEN, self.chat_id, message_id,  desc="Downloading... ",total=100)
 
-
         logger.info("All settings: %s", self.data)
         logger.info("Video URL to download: '%s'", self.data.url)
-        print(self.data.update["callback_query"].message)    # some default configurations for video downloads
+        print(self.data.update["callback_query"].message)
+        
+        # Get the local storage directory from environment variable
+        storage_dir = os.getenv('LOCAL_STORAGE_DIR', './data')
+        
+        # some default configurations for video downloads
         MP3_EXTENSION = 'mp3'
         YT_DLP_OPTIONS = {
             'format': self.data.selected_format,
             'restrictfilenames': True,
-            'outtmpl': '%(title)s.%(ext)s',
+            'outtmpl': f'{storage_dir}/%(title)s.%(ext)s',  # Save to configured storage directory
             'postprocessors': [{
                 'key': 'FFmpegExtractAudio',
                 'preferredcodec': MP3_EXTENSION,
@@ -78,27 +82,26 @@ class DownloadTask:
         
         self.pbar.update(100)
         self.pbar.close()
-        #self.bot.delete_message(self.pbar._TelegramIO.message_id, self.old_message_id)
-        self.bot.edit_message_text(f"Uploading file to {self.data.storage}....", self.chat_id, message_id)
 
+        # Get the file path with MP3 extension
+        original_video_name = original_video_name.replace('/home/bot/', './')
         raw_media_name = os.path.splitext(original_video_name)[0]
         final_media_name = "%s.%s" % (raw_media_name, MP3_EXTENSION)
+        logger.info(f"File downloaded to: {final_media_name}")
 
-        # upload the file
-        backend_name = self.data.storage
-        backend = None
-        if backend_name == CALLBACK_GOOGLE_DRIVE:
-            backend = GoogleDriveStorage()
-        elif backend_name == CALLBACK_OVERCAST:
-            backend = OvercastStorage()
-        else:
-            logger.error("Invalid backend '%s'", backend)
+        self.bot.edit_message_text(f"Saving file to local storage...", self.chat_id, message_id)
+
+        try:
+            # Use local storage backend
+            backend = LocalStorage()
+            backend.upload(final_media_name)
+            self.bot.edit_message_text(f"Your food is ready!🎉 \n \nurl: {self.data.url}\nformat: {self.data.selected_format}\nLocation: {storage_dir}/", self.chat_id, message_id)
+        except Exception as e:
+            logger.error(f"Local storage failed: {e}")
+            self.bot.edit_message_text(f"Error saving file: {final_media_name}\nError: {str(e)[:100]}", self.chat_id, message_id)
         
-        logger.info("Uploading the file..")
-        backend.upload(final_media_name)
-        self.bot.edit_message_text(f"Your food is ready!🎉 \n \nurl: {self.data.url}\nstorage: {self.data.storage}\nformat: {self.data.selected_format}", self.chat_id, message_id )
+        # Delete the original message after processing
         self.bot.delete_message(self.chat_id, self.old_message_id)
-        
 
     def my_hook(self, d):
         if d['status'] == 'finished':
