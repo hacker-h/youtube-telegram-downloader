@@ -14,6 +14,7 @@ from hurry.filesize import size
 import telegram
 from telegram_progress import tg_tqdm
 from dotenv import load_dotenv
+import time
 
 
 CALLBACK_MP4 = "mp4"
@@ -64,12 +65,13 @@ class DownloadTask:
         and save it to local storage.
         """
         try:
-            # Send progress message
-            progress_msg = self.bot.send_message(self.chat_id, "🔄 Starting download...")
+            # Send progress message with unique session identifier
+            session_id = str(int(time.time()))[-4:]  # Last 4 digits of timestamp
+            progress_msg = self.bot.send_message(self.chat_id, f"🔄 Starting download... (#{session_id})")
             self.progress_message_id = progress_msg.message_id
             
             # Initialize progress bar
-            self.pbar = tg_tqdm(BOT_TOKEN, self.chat_id, self.progress_message_id, desc="Downloading... ", total=100)
+            self.pbar = tg_tqdm(BOT_TOKEN, self.chat_id, self.progress_message_id, desc=f"Downloading #{session_id}... ", total=100)
 
             logger.info("All settings: %s", self.data)
             logger.info("Video URL to download: '%s'", self.data.url)
@@ -99,9 +101,8 @@ class DownloadTask:
                 result = ydl.extract_info("{}".format(self.data.url))
                 original_video_name = ydl.prepare_filename(result)
             
-            # Ensure progress bar shows 100% and cleanup
+            # Cleanup progress bar after download completes
             if self.pbar:
-                self.pbar.update(100)
                 self.pbar.close()
                 self.pbar = None
 

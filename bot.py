@@ -243,10 +243,8 @@ def download_media_with_default_format(update, context):
     url = context.user_data["url"]
     output_format = DEFAULT_OUTPUT_FORMAT
     
-    query = update.callback_query
-    query.edit_message_text(text=f"Thank you for your order!🧑‍🍳\nI will start cooking following recipe🧾\n\nurl: {url} \nformat: {selected_format}\noutput: {output_format}\n😋😋😋😋",disable_web_page_preview=True)
-    
     # Always use local storage now, pass output_format to TaskData
+    # The DownloadTask will handle all progress messaging
     data = TaskData(url, CALLBACK_LOCAL, selected_format, update, output_format)
     task = DownloadTask(data)
     task.downloadVideo()
@@ -264,9 +262,8 @@ def download_media(update, context):
     url = context.user_data["url"]
     output_format = query.data
     
-    query.edit_message_text(text=f"Thank you for your order!🧑‍🍳\nI will start cooking following recipe🧾\n\nurl: {url} \nformat: {selected_format}\noutput: {output_format}\n😋😋😋😋",disable_web_page_preview=True)
-    
     # Always use local storage now, pass output_format to TaskData
+    # The DownloadTask will handle all progress messaging
     data = TaskData(url, CALLBACK_LOCAL, selected_format, update, output_format)
     task = DownloadTask(data)
     task.downloadVideo()
