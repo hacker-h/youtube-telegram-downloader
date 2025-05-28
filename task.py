@@ -5,7 +5,6 @@ import requests
 
 import telegram
 from telegram import update
-from backends.local_storage import LocalStorage
 from telegram.ext import CallbackQueryHandler, ConversationHandler, CommandHandler, Filters, MessageHandler, Updater
 import logging
 import os
@@ -86,22 +85,25 @@ class DownloadTask:
             logger.info("Output format: '%s'", self.data.output_format)
             logger.info("Storage backend: '%s'", self.data.storage)
             
-            # Get storage path from storage manager
-            if self.data.storage_manager:
-                storage_dir = self.data.storage_manager.ensure_storage_path(self.data.storage)
-                backend_name = self.data.storage_manager.get_backend_display_name(self.data.storage)
-                logger.info(f"Using storage backend: {backend_name} -> {storage_dir}")
-            else:
-                # Fallback to environment variable
-                storage_dir = os.getenv('LOCAL_STORAGE_DIR', './data')
-                backend_name = "Local Storage"
-                logger.info(f"Using fallback storage: {storage_dir}")
+            # Always download to /tmp first, then move to correct backend directory
+            temp_download_dir = "/tmp"
             
-            # Configure yt-dlp options based on output format
+            # Get final storage path from storage manager
+            if self.data.storage_manager:
+                final_storage_dir = self.data.storage_manager.ensure_storage_path(self.data.storage)
+                backend_name = self.data.storage_manager.get_backend_display_name(self.data.storage)
+                logger.info(f"Will download to {temp_download_dir} then move to: {backend_name} -> {final_storage_dir}")
+            else:
+                # Fallback to environment variable for local storage
+                final_storage_dir = os.getenv('LOCAL_STORAGE_DIR', './data')
+                backend_name = "Local Storage"
+                logger.info(f"Will download to {temp_download_dir} then move to: {final_storage_dir}")
+            
+            # Configure yt-dlp options to download to /tmp
             YT_DLP_OPTIONS = {
                 'format': self.data.selected_format,
                 'restrictfilenames': True,
-                'outtmpl': f'{storage_dir}/%(title)s.%(ext)s',  # Save to configured storage directory
+                'outtmpl': f'{temp_download_dir}/%(title)s.%(ext)s',  # Download to /tmp
                 'progress_hooks': [self.my_hook]
             }
             
@@ -124,37 +126,45 @@ class DownloadTask:
                 self.pbar = None
 
             # Determine the final file name based on output format
-            original_video_name = original_video_name.replace('/home/bot/', './')
-            raw_media_name = os.path.splitext(original_video_name)[0]
+            temp_file_path = original_video_name.replace('/home/bot/', './')
+            raw_media_name = os.path.splitext(temp_file_path)[0]
             
             if self.data.output_format == 'mp3':
-                final_media_name = f"{raw_media_name}.mp3"
+                temp_file_path = f"{raw_media_name}.mp3"
             else:  # mp4 or keep original format
                 # For MP4, the file might already have the correct extension from yt-dlp
-                final_media_name = original_video_name
+                pass  # temp_file_path is already correct
             
-            logger.info(f"File downloaded to: {final_media_name}")
+            logger.info(f"File downloaded to temp location: {temp_file_path}")
 
-            # Update message to show saving progress
-            self.bot.edit_message_text(f"💾 Saving file to {backend_name}...", self.chat_id, self.progress_message_id)
+            # Update message to show moving to final storage
+            self.bot.edit_message_text(f"💾 Moving file to {backend_name}...", self.chat_id, self.progress_message_id)
 
             try:
-                # Use local storage backend (files are already saved by yt-dlp)
-                backend = LocalStorage()
-                backend.upload(final_media_name)
+                # Move file from /tmp to final storage directory
+                filename = os.path.basename(temp_file_path)
+                final_file_path = os.path.join(final_storage_dir, filename)
                 
-                # Final success message with backend info
-                filename = os.path.basename(final_media_name)
+                # Ensure final directory exists
+                os.makedirs(final_storage_dir, exist_ok=True)
+                
+                # Move file to final location
+                import shutil
+                shutil.move(temp_file_path, final_file_path)
+                logger.info(f"File moved from {temp_file_path} to {final_file_path}")
+                
+                # Determine cloud sync info
                 cloud_info = ""
-                if self.data.storage_manager and self.data.storage_manager.is_cloud_backend(self.data.storage):
+                if self.data.storage != 'local':
                     cloud_info = f"\n☁️ Cloud sync: Will be synced to {self.data.storage} automatically"
                 
+                # Final success message with backend info
                 self.bot.edit_message_text(
                     f"✅ Download completed!\n\n"
                     f"📁 File: {filename}\n"
                     f"🎵 Format: {self.data.output_format.upper()}\n"
                     f"💾 Backend: {backend_name}\n"
-                    f"📂 Location: {storage_dir}/"
+                    f"📂 Location: {final_storage_dir}/"
                     f"{cloud_info}\n"
                     f"🔗 URL: {self.data.url[:50]}...", 
                     self.chat_id, 
@@ -162,10 +172,10 @@ class DownloadTask:
                     disable_web_page_preview=True
                 )
             except Exception as e:
-                logger.error(f"Storage backend failed: {e}")
+                logger.error(f"Error moving file to final storage: {e}")
                 self.bot.edit_message_text(
-                    f"❌ Error saving file: {final_media_name}\n"
-                    f"Backend: {backend_name}\n"
+                    f"❌ Error moving file to {backend_name}\n"
+                    f"Temp file: {temp_file_path}\n"
                     f"Error: {str(e)[:100]}", 
                     self.chat_id, 
                     self.progress_message_id
