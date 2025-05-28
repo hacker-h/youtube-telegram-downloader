@@ -46,7 +46,8 @@ class StorageManager:
     def get_storage_path(self, backend: str) -> str:
         """Get the storage path for a given backend"""
         if backend == "local":
-            return self.local_storage_dir
+            # Local storage also gets its own subdirectory
+            return os.path.join(self.local_storage_dir, "local")
         else:
             # For cloud backends, use subdirectory
             return os.path.join(self.local_storage_dir, backend)

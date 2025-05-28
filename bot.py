@@ -120,25 +120,16 @@ def ls_command(update, context):
         logger.info("Ignoring ls request from untrusted user '%s' with id '%s'", user.first_name, user.id)
         return
     
-    try:
-        media_files, storage_dir = get_media_files_list()
-        
-        if media_files is None:
-            update.message.reply_text(f"📁 Storage directory not found: {storage_dir}")
-            return
-        
-        if not media_files:
-            update.message.reply_text(f"📁 No media files found in: {storage_dir}")
-            return
-        
-        # Format and send the file list
-        chunks = format_file_list(media_files)
-        for chunk in chunks:
-            update.message.reply_text(chunk, parse_mode='Markdown')
+    # Check if we should ask for backend selection
+    backend = get_backend_for_command(update, context, "ls")
+    if backend is None:
+        # Multiple backends available, ask user to choose
+        show_backend_selection_for_command(update, context, "ls")
+        return
     
-    except Exception as e:
-        logger.error(f"Error in ls command: {e}")
-        update.message.reply_text(f"❌ Error listing files: {str(e)[:100]}")
+    # Execute ls command with determined backend
+    backend_name = storage_manager.get_backend_display_name(backend)
+    execute_ls_command(update, backend, backend_name)
 
 
 def help_command(update, context):
@@ -232,26 +223,22 @@ def sanitize_search_query(query):
     return safe_query.strip()
 
 
-def get_media_files_list():
+def get_media_files_from_path(storage_path):
     """
-    Reusable function to get all media files from storage directory.
-    Returns list of file info dictionaries or None if directory doesn't exist.
+    Get all media files from a specific storage path.
+    Returns list of file info dictionaries.
     """
     try:
-        storage_dir = os.getenv('LOCAL_STORAGE_DIR', './data')
-        # Convert relative path to absolute path for directory listing
-        if storage_dir.startswith('./'):
-            storage_dir = '/home/bot/' + storage_dir[2:]
-        
-        if not os.path.exists(storage_dir):
-            return None, storage_dir
+        if not os.path.exists(storage_path):
+            logger.info(f"Storage path does not exist: {storage_path}")
+            return []
         
         # Get all media files
         media_extensions = {'.mp3', '.mp4', '.wav', '.flac', '.avi', '.mkv', '.webm', '.m4a', '.ogg'}
         media_files = []
         
-        for filename in os.listdir(storage_dir):
-            file_path = os.path.join(storage_dir, filename)
+        for filename in os.listdir(storage_path):
+            file_path = os.path.join(storage_path, filename)
             if os.path.isfile(file_path) and any(filename.lower().endswith(ext) for ext in media_extensions):
                 # Get file size
                 try:
@@ -269,9 +256,30 @@ def get_media_files_list():
         # Sort alphabetically by filename
         media_files.sort(key=lambda x: x['name'].lower())
         
-        return media_files, storage_dir
+        return media_files
     except Exception as e:
-        logger.error(f"Error getting media files list: {e}")
+        logger.error(f"Error getting media files from {storage_path}: {e}")
+        return []
+
+
+def get_media_files_list():
+    """
+    Legacy function for backward compatibility.
+    Now uses the default backend or local storage.
+    """
+    try:
+        # Use default backend if available, otherwise local
+        default_backend = storage_manager.get_default_backend()
+        if default_backend:
+            storage_path = storage_manager.get_storage_path(default_backend)
+        else:
+            # Fallback to local backend
+            storage_path = storage_manager.get_storage_path("local")
+        
+        media_files = get_media_files_from_path(storage_path)
+        return media_files, storage_path
+    except Exception as e:
+        logger.error(f"Error in get_media_files_list: {e}")
         return None, None
 
 
@@ -349,44 +357,16 @@ def search_command(update, context):
     if search_query != raw_search_query:
         logger.warning(f"Search query sanitized: '{raw_search_query}' -> '{search_query}'")
     
-    try:
-        # Reuse the secure media files listing function
-        all_media_files, storage_dir = get_media_files_list()
-        
-        if all_media_files is None:
-            update.message.reply_text(f"📁 Storage directory not found: {storage_dir}")
-            return
-        
-        # Filter files by search query (case-insensitive)
-        # This is safe because we only filter existing filenames, no commands are executed
-        search_query_lower = search_query.lower()
-        matching_files = [
-            file_info for file_info in all_media_files 
-            if search_query_lower in file_info['name'].lower()
-        ]
-        
-        if not matching_files:
-            update.message.reply_text(
-                f"🔎 **No files found**\n\n"
-                f"No files matching `{search_query}` found in storage.\n\n"
-                f"📂 Searched in: `{storage_dir}`\n"
-                f"📊 Total files in storage: {len(all_media_files)}\n\n"
-                f"Use `/ls` to see all files.",
-                parse_mode='Markdown'
-            )
-            return
-        
-        # Format the search results using the reusable function
-        title = f"🔎 **Search Results**\n🔍 Query: `{search_query}`"
-        chunks = format_file_list(matching_files, title)
-        
-        # Send all chunks
-        for chunk in chunks:
-            update.message.reply_text(chunk, parse_mode='Markdown')
+    # Check if we should ask for backend selection
+    backend = get_backend_for_command(update, context, "search")
+    if backend is None:
+        # Multiple backends available, ask user to choose
+        show_backend_selection_for_command(update, context, "search", context.args)
+        return
     
-    except Exception as e:
-        logger.error(f"Error in search command: {e}")
-        update.message.reply_text(f"❌ Error searching files: {str(e)[:100]}")
+    # Execute search command with determined backend
+    backend_name = storage_manager.get_backend_display_name(backend)
+    execute_search_command(update, backend, backend_name, context.args)
 
 
 def start(update, context):
@@ -681,6 +661,174 @@ def proceed_to_format_selection(update, context):
         return OUTPUT
 
 
+def get_backend_for_command(update, context, command_name):
+    """
+    Get the backend to use for ls/search commands.
+    Returns backend name or None if user needs to choose.
+    """
+    # Check if default backend is set
+    default_backend = storage_manager.get_default_backend()
+    if default_backend:
+        logger.info(f"{command_name} using default backend: {default_backend}")
+        return default_backend
+    
+    # Check if only one backend available
+    available_backends = storage_manager.get_available_backends()
+    if len(available_backends) == 1:
+        backend = list(available_backends.keys())[0]
+        logger.info(f"{command_name} using only available backend: {backend}")
+        return backend
+    
+    # Multiple backends available, need to ask user
+    return None
+
+
+def show_backend_selection_for_command(update, context, command_name, command_args=None):
+    """
+    Show backend selection for ls/search commands.
+    """
+    available_backends = storage_manager.get_available_backends()
+    
+    # Build keyboard with available backends
+    button_list = []
+    for backend_id, backend_name in available_backends.items():
+        if backend_id == "local":
+            emoji = "💾"
+        else:
+            emoji = "☁️"
+        
+        # Create callback data with command and args
+        callback_data = f"cmd_{command_name}_{backend_id}"
+        if command_args:
+            # For search, we'll store args in user_data
+            context.user_data[f"{command_name}_args"] = command_args
+        
+        button_list.append(InlineKeyboardButton(
+            f"{emoji} {backend_name}", callback_data=callback_data))
+    
+    reply_markup = InlineKeyboardMarkup(build_menu(button_list, n_cols=1))
+    
+    if command_name == "search" and command_args:
+        message_text = f"🔎 **Choose Backend for Search**\n\nSearch query: `{' '.join(command_args)}`\nWhich storage backend should I search?"
+    else:
+        message_text = f"📁 **Choose Backend for {command_name.upper()}**\n\nWhich storage backend should I list?"
+    
+    update.message.reply_text(
+        message_text,
+        reply_markup=reply_markup,
+        parse_mode='Markdown'
+    )
+
+
+def handle_command_backend_selection(update, context):
+    """
+    Handle backend selection for ls/search commands.
+    """
+    query = update.callback_query
+    query.answer()
+    
+    # Parse callback data: cmd_command_backend
+    parts = query.data.split('_')
+    if len(parts) != 3 or parts[0] != 'cmd':
+        query.edit_message_text("❌ Invalid command selection")
+        return
+    
+    command_name = parts[1]
+    backend = parts[2]
+    
+    backend_name = storage_manager.get_backend_display_name(backend)
+    logger.info(f"User selected backend {backend} for {command_name} command")
+    
+    # Execute the command with selected backend
+    if command_name == "ls":
+        execute_ls_command(query, backend, backend_name)
+    elif command_name == "search":
+        # Get search args from user_data
+        search_args = context.user_data.get("search_args", [])
+        execute_search_command(query, backend, backend_name, search_args)
+        # Clean up
+        context.user_data.pop("search_args", None)
+
+
+def execute_ls_command(update_or_query, backend, backend_name):
+    """
+    Execute ls command for a specific backend.
+    """
+    try:
+        storage_path = storage_manager.get_storage_path(backend)
+        media_files = get_media_files_from_path(storage_path)
+        
+        if not media_files:
+            message = f"📁 No media files found in: {backend_name}\n📂 Path: `{storage_path}`"
+        else:
+            # Format and send the file list
+            title = f"📁 **{backend_name} Files** ({len(media_files)} files)"
+            chunks = format_file_list(media_files, title)
+            message = chunks[0] if chunks else "📁 No files found"
+        
+        if hasattr(update_or_query, 'callback_query'):
+            # From button selection
+            update_or_query.edit_message_text(message, parse_mode='Markdown')
+        else:
+            # From direct command
+            update_or_query.message.reply_text(message, parse_mode='Markdown')
+            
+    except Exception as e:
+        logger.error(f"Error in ls command for backend {backend}: {e}")
+        error_msg = f"❌ Error listing files from {backend_name}: {str(e)[:100]}"
+        if hasattr(update_or_query, 'callback_query'):
+            update_or_query.edit_message_text(error_msg)
+        else:
+            update_or_query.message.reply_text(error_msg)
+
+
+def execute_search_command(update_or_query, backend, backend_name, search_args):
+    """
+    Execute search command for a specific backend.
+    """
+    try:
+        search_query = ' '.join(search_args).strip()
+        if not search_query:
+            message = "🔎 No search query provided"
+        else:
+            search_query = sanitize_search_query(search_query)
+            storage_path = storage_manager.get_storage_path(backend)
+            all_media_files = get_media_files_from_path(storage_path)
+            
+            # Filter files by search query (case-insensitive)
+            search_query_lower = search_query.lower()
+            matching_files = [
+                file_info for file_info in all_media_files 
+                if search_query_lower in file_info['name'].lower()
+            ]
+            
+            if not matching_files:
+                message = (f"🔎 **No files found**\n\n"
+                          f"No files matching `{search_query}` found in {backend_name}.\n\n"
+                          f"📂 Searched in: `{storage_path}`\n"
+                          f"📊 Total files in backend: {len(all_media_files)}")
+            else:
+                # Format the search results
+                title = f"🔎 **Search Results in {backend_name}**\n🔍 Query: `{search_query}`"
+                chunks = format_file_list(matching_files, title)
+                message = chunks[0] if chunks else "🔎 No results found"
+        
+        if hasattr(update_or_query, 'callback_query'):
+            # From button selection
+            update_or_query.edit_message_text(message, parse_mode='Markdown')
+        else:
+            # From direct command
+            update_or_query.message.reply_text(message, parse_mode='Markdown')
+            
+    except Exception as e:
+        logger.error(f"Error in search command for backend {backend}: {e}")
+        error_msg = f"❌ Error searching in {backend_name}: {str(e)[:100]}"
+        if hasattr(update_or_query, 'callback_query'):
+            update_or_query.edit_message_text(error_msg)
+        else:
+            update_or_query.message.reply_text(error_msg)
+
+
 def main():
     # Create the Updater and pass it your bot's token.
     updater = Updater(BOT_TOKEN)
@@ -713,6 +861,7 @@ def main():
     dp.add_handler(CommandHandler('whoami', whoami))
     dp.add_handler(CommandHandler('help', help_command))
     dp.add_handler(CommandHandler('search', search_command))
+    dp.add_handler(CallbackQueryHandler(handle_command_backend_selection, pattern='^cmd_'))
     dp.add_handler(conv_handler)
 
     # Start the Bot
