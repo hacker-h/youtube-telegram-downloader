@@ -177,6 +177,72 @@ def ls_command(update, context):
         update.message.reply_text(f"❌ Error listing files: {str(e)[:100]}")
 
 
+def help_command(update, context):
+    """Show help information about all available commands"""
+    user = update.message.from_user
+    if not is_trusted(user.id):
+        logger.info("Ignoring help request from untrusted user '%s' with id '%s'", user.first_name, user.id)
+        return
+    
+    # Get current configuration
+    default_format = os.getenv('DEFAULT_OUTPUT_FORMAT', '').upper()
+    storage_dir = os.getenv('LOCAL_STORAGE_DIR', './data')
+    
+    help_text = f"""🤖 **YouTube Telegram Downloader Bot**
+
+**📋 Available Commands:**
+
+🔍 `/help` - Show this help message
+👤 `/whoami` - Show your Telegram user ID
+📁 `/ls` - List all downloaded media files
+
+**🎵 Download Features:**
+
+📺 **Send any YouTube URL** to start downloading
+• Automatic download with format: **{default_format or 'Not set'}**
+• Real-time progress tracking with percentages
+• Supports both audio (MP3) and video (MP4) formats
+• Files saved to: `{storage_dir}`
+
+**🎯 Supported Platforms:**
+YouTube, and any platform supported by yt-dlp
+
+**⚙️ Current Configuration:**
+• Default output format: **{default_format or 'Manual selection'}**
+• Storage location: `{storage_dir}`
+• Auto-download: **{'✅ Enabled' if default_format else '❌ Manual selection required'}**
+
+**📖 Usage Examples:**
+
+1️⃣ **Download a video:**
+   Send: `https://www.youtube.com/watch?v=VIDEO_ID`
+   
+2️⃣ **List downloaded files:**
+   Send: `/ls`
+   
+3️⃣ **Check your user ID:**
+   Send: `/whoami`
+
+**🔒 Security:**
+Only trusted users can use this bot.
+
+**💡 Tips:**
+• Progress is shown in real-time during downloads
+• Your original URL message is automatically deleted after download
+• Use `/ls` to see all your downloaded files with sizes
+• Both audio and video formats are supported
+
+**🛠️ Technical Info:**
+• Powered by yt-dlp for reliable downloads
+• Local storage with configurable directory
+• Automatic format conversion (MP4→MP3 for audio)
+• Progress tracking with session IDs
+
+Need help? Contact your bot administrator! 🚀"""
+
+    update.message.reply_text(help_text, parse_mode='Markdown', disable_web_page_preview=True)
+
+
 def start(update, context):
     """
     Invoked on every user message to create an interactive inline conversation.
@@ -200,6 +266,11 @@ def start(update, context):
     # handle ls command as plain string
     if message_text == "ls":
         ls_command(update, context)
+        return ConversationHandler.END
+    
+    # handle help command as plain string
+    if message_text == "help":
+        help_command(update, context)
         return ConversationHandler.END
 
     # update global URL object
@@ -387,6 +458,7 @@ def main():
     # Add dedicated command handlers
     dp.add_handler(CommandHandler('ls', ls_command))
     dp.add_handler(CommandHandler('whoami', whoami))
+    dp.add_handler(CommandHandler('help', help_command))
     dp.add_handler(conv_handler)
 
     # Start the Bot
