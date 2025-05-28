@@ -94,6 +94,89 @@ def whoami(update, context):
         update.message.reply_text(user.id)
 
 
+def ls_command(update, context):
+    """List all media files in the storage directory"""
+    user = update.message.from_user
+    if not is_trusted(user.id):
+        logger.info("Ignoring ls request from untrusted user '%s' with id '%s'", user.first_name, user.id)
+        return
+    
+    try:
+        storage_dir = os.getenv('LOCAL_STORAGE_DIR', './data')
+        # Convert relative path to absolute path for directory listing
+        if storage_dir.startswith('./'):
+            storage_dir = '/home/bot/' + storage_dir[2:]
+        
+        if not os.path.exists(storage_dir):
+            update.message.reply_text(f"📁 Storage directory not found: {storage_dir}")
+            return
+        
+        # Get all media files
+        media_extensions = {'.mp3', '.mp4', '.wav', '.flac', '.avi', '.mkv', '.webm', '.m4a', '.ogg'}
+        media_files = []
+        
+        for filename in os.listdir(storage_dir):
+            file_path = os.path.join(storage_dir, filename)
+            if os.path.isfile(file_path) and any(filename.lower().endswith(ext) for ext in media_extensions):
+                # Get file size
+                try:
+                    file_size = os.path.getsize(file_path)
+                    size_str = size(file_size)
+                except:
+                    size_str = "Unknown"
+                
+                media_files.append({
+                    'name': filename,
+                    'size': size_str,
+                    'path': file_path
+                })
+        
+        # Sort alphabetically by filename
+        media_files.sort(key=lambda x: x['name'].lower())
+        
+        if not media_files:
+            update.message.reply_text(f"📁 No media files found in: {storage_dir}")
+            return
+        
+        # Format the list
+        file_list = f"📁 **Media Files** ({len(media_files)} files)\n"
+        file_list += f"📂 Location: `{storage_dir}`\n\n"
+        
+        for i, file_info in enumerate(media_files, 1):
+            # Determine emoji based on file extension
+            name = file_info['name']
+            if name.lower().endswith(('.mp3', '.wav', '.flac', '.m4a', '.ogg')):
+                emoji = "🎵"
+            else:
+                emoji = "🎬"
+            
+            file_list += f"{i:2d}. {emoji} `{name}`\n"
+            file_list += f"     📊 Size: {file_info['size']}\n\n"
+        
+        # Split message if too long for Telegram
+        max_length = 4000
+        if len(file_list) > max_length:
+            # Send in chunks
+            lines = file_list.split('\n')
+            current_chunk = lines[0] + '\n' + lines[1] + '\n\n'  # Header
+            
+            for line in lines[2:]:
+                if len(current_chunk + line + '\n') > max_length:
+                    update.message.reply_text(current_chunk, parse_mode='Markdown')
+                    current_chunk = line + '\n'
+                else:
+                    current_chunk += line + '\n'
+            
+            if current_chunk.strip():
+                update.message.reply_text(current_chunk, parse_mode='Markdown')
+        else:
+            update.message.reply_text(file_list, parse_mode='Markdown')
+    
+    except Exception as e:
+        logger.error(f"Error in ls command: {e}")
+        update.message.reply_text(f"❌ Error listing files: {str(e)[:100]}")
+
+
 def start(update, context):
     """
     Invoked on every user message to create an interactive inline conversation.
@@ -112,6 +195,11 @@ def start(update, context):
     # also handle whoami command as plain string
     if message_text == "whoami":
         whoami(update, context)
+        return ConversationHandler.END
+    
+    # handle ls command as plain string
+    if message_text == "ls":
+        ls_command(update, context)
         return ConversationHandler.END
 
     # update global URL object
@@ -296,6 +384,9 @@ def main():
         fallbacks=[CommandHandler('whoami', whoami)],
     )
 
+    # Add dedicated command handlers
+    dp.add_handler(CommandHandler('ls', ls_command))
+    dp.add_handler(CommandHandler('whoami', whoami))
     dp.add_handler(conv_handler)
 
     # Start the Bot
