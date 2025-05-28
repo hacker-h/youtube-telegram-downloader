@@ -131,75 +131,20 @@ def ls_command(update, context):
         return
     
     try:
-        storage_dir = os.getenv('LOCAL_STORAGE_DIR', './data')
-        # Convert relative path to absolute path for directory listing
-        if storage_dir.startswith('./'):
-            storage_dir = '/home/bot/' + storage_dir[2:]
+        media_files, storage_dir = get_media_files_list()
         
-        if not os.path.exists(storage_dir):
+        if media_files is None:
             update.message.reply_text(f"📁 Storage directory not found: {storage_dir}")
             return
-        
-        # Get all media files
-        media_extensions = {'.mp3', '.mp4', '.wav', '.flac', '.avi', '.mkv', '.webm', '.m4a', '.ogg'}
-        media_files = []
-        
-        for filename in os.listdir(storage_dir):
-            file_path = os.path.join(storage_dir, filename)
-            if os.path.isfile(file_path) and any(filename.lower().endswith(ext) for ext in media_extensions):
-                # Get file size
-                try:
-                    file_size = os.path.getsize(file_path)
-                    size_str = size(file_size)
-                except:
-                    size_str = "Unknown"
-                
-                media_files.append({
-                    'name': filename,
-                    'size': size_str,
-                    'path': file_path
-                })
-        
-        # Sort alphabetically by filename
-        media_files.sort(key=lambda x: x['name'].lower())
         
         if not media_files:
             update.message.reply_text(f"📁 No media files found in: {storage_dir}")
             return
         
-        # Format the list
-        file_list = f"📁 **Media Files** ({len(media_files)} files)\n"
-        file_list += f"📂 Location: `{storage_dir}`\n\n"
-        
-        for i, file_info in enumerate(media_files, 1):
-            # Determine emoji based on file extension
-            name = file_info['name']
-            if name.lower().endswith(('.mp3', '.wav', '.flac', '.m4a', '.ogg')):
-                emoji = "🎵"
-            else:
-                emoji = "🎬"
-            
-            file_list += f"{i:2d}. {emoji} `{name}`\n"
-            file_list += f"     📊 Size: {file_info['size']}\n\n"
-        
-        # Split message if too long for Telegram
-        max_length = 4000
-        if len(file_list) > max_length:
-            # Send in chunks
-            lines = file_list.split('\n')
-            current_chunk = lines[0] + '\n' + lines[1] + '\n\n'  # Header
-            
-            for line in lines[2:]:
-                if len(current_chunk + line + '\n') > max_length:
-                    update.message.reply_text(current_chunk, parse_mode='Markdown')
-                    current_chunk = line + '\n'
-                else:
-                    current_chunk += line + '\n'
-            
-            if current_chunk.strip():
-                update.message.reply_text(current_chunk, parse_mode='Markdown')
-        else:
-            update.message.reply_text(file_list, parse_mode='Markdown')
+        # Format and send the file list
+        chunks = format_file_list(media_files)
+        for chunk in chunks:
+            update.message.reply_text(chunk, parse_mode='Markdown')
     
     except Exception as e:
         logger.error(f"Error in ls command: {e}")
@@ -277,29 +222,31 @@ Need help? Contact your bot administrator! 🚀"""
     update.message.reply_text(help_text, parse_mode='Markdown', disable_web_page_preview=True)
 
 
-def search_command(update, context):
-    """Search for media files by title (case-insensitive)"""
-    user = update.message.from_user
-    if not is_trusted(user.id):
-        logger.info("Ignoring search request from untrusted user '%s' with id '%s'", user.first_name, user.id)
-        return
+def sanitize_search_query(query):
+    """
+    Sanitize search query to prevent any potential security issues.
+    Remove potentially dangerous characters and limit length.
+    """
+    import re
     
-    # Get search query from command arguments
-    search_query = ' '.join(context.args).strip()
+    # Remove control characters, null bytes, and other dangerous chars
+    # Keep only alphanumeric, spaces, dots, hyphens, underscores
+    safe_query = re.sub(r'[^\w\s\.\-]', '', query)
     
-    if not search_query:
-        update.message.reply_text(
-            "🔎 **Search Media Files**\n\n"
-            "Usage: `/search <query>`\n\n"
-            "**Examples:**\n"
-            "• `/search music`\n"
-            "• `/search infraction`\n"
-            "• `/search .mp3` (search by file extension)\n\n"
-            "Search is case-insensitive and matches anywhere in the filename.",
-            parse_mode='Markdown'
-        )
-        return
+    # Limit length to prevent abuse
+    safe_query = safe_query[:100]
     
+    # Remove excessive whitespace
+    safe_query = ' '.join(safe_query.split())
+    
+    return safe_query.strip()
+
+
+def get_media_files_list():
+    """
+    Reusable function to get all media files from storage directory.
+    Returns list of file info dictionaries or None if directory doesn't exist.
+    """
     try:
         storage_dir = os.getenv('LOCAL_STORAGE_DIR', './data')
         # Convert relative path to absolute path for directory listing
@@ -307,12 +254,11 @@ def search_command(update, context):
             storage_dir = '/home/bot/' + storage_dir[2:]
         
         if not os.path.exists(storage_dir):
-            update.message.reply_text(f"📁 Storage directory not found: {storage_dir}")
-            return
+            return None, storage_dir
         
         # Get all media files
         media_extensions = {'.mp3', '.mp4', '.wav', '.flac', '.avi', '.mkv', '.webm', '.m4a', '.ogg'}
-        all_media_files = []
+        media_files = []
         
         for filename in os.listdir(storage_dir):
             file_path = os.path.join(storage_dir, filename)
@@ -324,21 +270,110 @@ def search_command(update, context):
                 except:
                     size_str = "Unknown"
                 
-                all_media_files.append({
+                media_files.append({
                     'name': filename,
                     'size': size_str,
                     'path': file_path
                 })
         
+        # Sort alphabetically by filename
+        media_files.sort(key=lambda x: x['name'].lower())
+        
+        return media_files, storage_dir
+    except Exception as e:
+        logger.error(f"Error getting media files list: {e}")
+        return None, None
+
+
+def format_file_list(media_files, title="📁 **Media Files**", max_length=4000):
+    """
+    Format media files list for display with automatic chunking.
+    Returns list of message chunks.
+    """
+    if not media_files:
+        return []
+    
+    file_list = f"{title} ({len(media_files)} files)\n"
+    file_list += f"📂 Location: `{os.getenv('LOCAL_STORAGE_DIR', './data')}`\n\n"
+    
+    for i, file_info in enumerate(media_files, 1):
+        # Determine emoji based on file extension
+        name = file_info['name']
+        if name.lower().endswith(('.mp3', '.wav', '.flac', '.m4a', '.ogg')):
+            emoji = "🎵"
+        else:
+            emoji = "🎬"
+        
+        file_list += f"{i:2d}. {emoji} `{name}`\n"
+        file_list += f"     📊 Size: {file_info['size']}\n\n"
+    
+    # Split message if too long for Telegram
+    if len(file_list) <= max_length:
+        return [file_list]
+    
+    # Split into chunks
+    chunks = []
+    lines = file_list.split('\n')
+    current_chunk = lines[0] + '\n' + lines[1] + '\n\n'  # Header
+    
+    for line in lines[2:]:
+        if len(current_chunk + line + '\n') > max_length:
+            if current_chunk.strip():
+                chunks.append(current_chunk)
+            current_chunk = line + '\n'
+        else:
+            current_chunk += line + '\n'
+    
+    if current_chunk.strip():
+        chunks.append(current_chunk)
+    
+    return chunks
+
+
+def search_command(update, context):
+    """Search for media files by title (case-insensitive) - SECURITY HARDENED"""
+    user = update.message.from_user
+    if not is_trusted(user.id):
+        logger.info("Ignoring search request from untrusted user '%s' with id '%s'", user.first_name, user.id)
+        return
+    
+    # Get and sanitize search query from command arguments
+    raw_search_query = ' '.join(context.args).strip()
+    search_query = sanitize_search_query(raw_search_query)
+    
+    if not search_query:
+        update.message.reply_text(
+            "🔎 **Search Media Files**\n\n"
+            "Usage: `/search <query>`\n\n"
+            "**Examples:**\n"
+            "• `/search music`\n"
+            "• `/search infraction`\n"
+            "• `/search mp3` (search by file extension)\n\n"
+            "Search is case-insensitive and matches anywhere in the filename.\n"
+            "⚠️ Only alphanumeric characters, spaces, dots, hyphens and underscores are allowed.",
+            parse_mode='Markdown'
+        )
+        return
+    
+    # Warn if query was sanitized
+    if search_query != raw_search_query:
+        logger.warning(f"Search query sanitized: '{raw_search_query}' -> '{search_query}'")
+    
+    try:
+        # Reuse the secure media files listing function
+        all_media_files, storage_dir = get_media_files_list()
+        
+        if all_media_files is None:
+            update.message.reply_text(f"📁 Storage directory not found: {storage_dir}")
+            return
+        
         # Filter files by search query (case-insensitive)
+        # This is safe because we only filter existing filenames, no commands are executed
         search_query_lower = search_query.lower()
         matching_files = [
             file_info for file_info in all_media_files 
             if search_query_lower in file_info['name'].lower()
         ]
-        
-        # Sort alphabetically by filename
-        matching_files.sort(key=lambda x: x['name'].lower())
         
         if not matching_files:
             update.message.reply_text(
@@ -351,40 +386,13 @@ def search_command(update, context):
             )
             return
         
-        # Format the search results
-        result_text = f"🔎 **Search Results** ({len(matching_files)} files found)\n"
-        result_text += f"🔍 Query: `{search_query}`\n"
-        result_text += f"📂 Location: `{storage_dir}`\n\n"
+        # Format the search results using the reusable function
+        title = f"🔎 **Search Results**\n🔍 Query: `{search_query}`"
+        chunks = format_file_list(matching_files, title)
         
-        for i, file_info in enumerate(matching_files, 1):
-            # Determine emoji based on file extension
-            name = file_info['name']
-            if name.lower().endswith(('.mp3', '.wav', '.flac', '.m4a', '.ogg')):
-                emoji = "🎵"
-            else:
-                emoji = "🎬"
-            
-            result_text += f"{i:2d}. {emoji} `{name}`\n"
-            result_text += f"     📊 Size: {file_info['size']}\n\n"
-        
-        # Split message if too long for Telegram
-        max_length = 4000
-        if len(result_text) > max_length:
-            # Send in chunks
-            lines = result_text.split('\n')
-            current_chunk = lines[0] + '\n' + lines[1] + '\n' + lines[2] + '\n\n'  # Header
-            
-            for line in lines[3:]:
-                if len(current_chunk + line + '\n') > max_length:
-                    update.message.reply_text(current_chunk, parse_mode='Markdown')
-                    current_chunk = line + '\n'
-                else:
-                    current_chunk += line + '\n'
-            
-            if current_chunk.strip():
-                update.message.reply_text(current_chunk, parse_mode='Markdown')
-        else:
-            update.message.reply_text(result_text, parse_mode='Markdown')
+        # Send all chunks
+        for chunk in chunks:
+            update.message.reply_text(chunk, parse_mode='Markdown')
     
     except Exception as e:
         logger.error(f"Error in search command: {e}")
