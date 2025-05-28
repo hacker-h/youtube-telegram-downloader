@@ -224,6 +224,7 @@ def help_command(update, context):
 🔍 `/help` - Show this help message
 👤 `/whoami` - Show your Telegram user ID
 📁 `/ls` - List all downloaded media files
+🔎 `/search <query>` - Search for files by title (case-insensitive)
 
 **🎵 Download Features:**
 
@@ -249,7 +250,10 @@ YouTube, and any platform supported by yt-dlp
 2️⃣ **List downloaded files:**
    Send: `/ls`
    
-3️⃣ **Check your user ID:**
+3️⃣ **Search for files:**
+   Send: `/search music` or `/search freak`
+   
+4️⃣ **Check your user ID:**
    Send: `/whoami`
 
 **🔒 Security:**
@@ -259,6 +263,7 @@ Only trusted users can use this bot.
 • Progress is shown in real-time during downloads
 • Your original URL message is automatically deleted after download
 • Use `/ls` to see all your downloaded files with sizes
+• Use `/search` to find specific files quickly
 • Both audio and video formats are supported
 
 **🛠️ Technical Info:**
@@ -270,6 +275,120 @@ Only trusted users can use this bot.
 Need help? Contact your bot administrator! 🚀"""
 
     update.message.reply_text(help_text, parse_mode='Markdown', disable_web_page_preview=True)
+
+
+def search_command(update, context):
+    """Search for media files by title (case-insensitive)"""
+    user = update.message.from_user
+    if not is_trusted(user.id):
+        logger.info("Ignoring search request from untrusted user '%s' with id '%s'", user.first_name, user.id)
+        return
+    
+    # Get search query from command arguments
+    search_query = ' '.join(context.args).strip()
+    
+    if not search_query:
+        update.message.reply_text(
+            "🔎 **Search Media Files**\n\n"
+            "Usage: `/search <query>`\n\n"
+            "**Examples:**\n"
+            "• `/search music`\n"
+            "• `/search infraction`\n"
+            "• `/search .mp3` (search by file extension)\n\n"
+            "Search is case-insensitive and matches anywhere in the filename.",
+            parse_mode='Markdown'
+        )
+        return
+    
+    try:
+        storage_dir = os.getenv('LOCAL_STORAGE_DIR', './data')
+        # Convert relative path to absolute path for directory listing
+        if storage_dir.startswith('./'):
+            storage_dir = '/home/bot/' + storage_dir[2:]
+        
+        if not os.path.exists(storage_dir):
+            update.message.reply_text(f"📁 Storage directory not found: {storage_dir}")
+            return
+        
+        # Get all media files
+        media_extensions = {'.mp3', '.mp4', '.wav', '.flac', '.avi', '.mkv', '.webm', '.m4a', '.ogg'}
+        all_media_files = []
+        
+        for filename in os.listdir(storage_dir):
+            file_path = os.path.join(storage_dir, filename)
+            if os.path.isfile(file_path) and any(filename.lower().endswith(ext) for ext in media_extensions):
+                # Get file size
+                try:
+                    file_size = os.path.getsize(file_path)
+                    size_str = size(file_size)
+                except:
+                    size_str = "Unknown"
+                
+                all_media_files.append({
+                    'name': filename,
+                    'size': size_str,
+                    'path': file_path
+                })
+        
+        # Filter files by search query (case-insensitive)
+        search_query_lower = search_query.lower()
+        matching_files = [
+            file_info for file_info in all_media_files 
+            if search_query_lower in file_info['name'].lower()
+        ]
+        
+        # Sort alphabetically by filename
+        matching_files.sort(key=lambda x: x['name'].lower())
+        
+        if not matching_files:
+            update.message.reply_text(
+                f"🔎 **No files found**\n\n"
+                f"No files matching `{search_query}` found in storage.\n\n"
+                f"📂 Searched in: `{storage_dir}`\n"
+                f"📊 Total files in storage: {len(all_media_files)}\n\n"
+                f"Use `/ls` to see all files.",
+                parse_mode='Markdown'
+            )
+            return
+        
+        # Format the search results
+        result_text = f"🔎 **Search Results** ({len(matching_files)} files found)\n"
+        result_text += f"🔍 Query: `{search_query}`\n"
+        result_text += f"📂 Location: `{storage_dir}`\n\n"
+        
+        for i, file_info in enumerate(matching_files, 1):
+            # Determine emoji based on file extension
+            name = file_info['name']
+            if name.lower().endswith(('.mp3', '.wav', '.flac', '.m4a', '.ogg')):
+                emoji = "🎵"
+            else:
+                emoji = "🎬"
+            
+            result_text += f"{i:2d}. {emoji} `{name}`\n"
+            result_text += f"     📊 Size: {file_info['size']}\n\n"
+        
+        # Split message if too long for Telegram
+        max_length = 4000
+        if len(result_text) > max_length:
+            # Send in chunks
+            lines = result_text.split('\n')
+            current_chunk = lines[0] + '\n' + lines[1] + '\n' + lines[2] + '\n\n'  # Header
+            
+            for line in lines[3:]:
+                if len(current_chunk + line + '\n') > max_length:
+                    update.message.reply_text(current_chunk, parse_mode='Markdown')
+                    current_chunk = line + '\n'
+                else:
+                    current_chunk += line + '\n'
+            
+            if current_chunk.strip():
+                update.message.reply_text(current_chunk, parse_mode='Markdown')
+        else:
+            update.message.reply_text(result_text, parse_mode='Markdown')
+    
+    except Exception as e:
+        logger.error(f"Error in search command: {e}")
+        update.message.reply_text(f"❌ Error searching files: {str(e)[:100]}")
 
 
 def start(update, context):
@@ -509,6 +628,7 @@ def main():
     dp.add_handler(CommandHandler('ls', ls_command))
     dp.add_handler(CommandHandler('whoami', whoami))
     dp.add_handler(CommandHandler('help', help_command))
+    dp.add_handler(CommandHandler('search', search_command))
     dp.add_handler(conv_handler)
 
     # Start the Bot
