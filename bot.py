@@ -41,6 +41,14 @@ if TRUSTED_USER_IDS is [] or TRUSTED_USER_IDS == [""]:
     TRUSTED_USER_IDS = TRUST_ANYBODY
     logger.info("TRUSTED_USER_IDS was not set, bot will trust anybody.")
 
+# Check for default output format
+DEFAULT_OUTPUT_FORMAT = os.getenv('DEFAULT_OUTPUT_FORMAT', '').lower()
+if DEFAULT_OUTPUT_FORMAT:
+    logger.info(f"DEFAULT_OUTPUT_FORMAT is set to: {DEFAULT_OUTPUT_FORMAT}")
+    if DEFAULT_OUTPUT_FORMAT not in ['mp3', 'mp4']:
+        logger.warning(f"Invalid DEFAULT_OUTPUT_FORMAT '{DEFAULT_OUTPUT_FORMAT}', must be 'mp3' or 'mp4'. Ignoring.")
+        DEFAULT_OUTPUT_FORMAT = ''
+
 # Stages - removed STORAGE stage since we only have local storage
 OUTPUT, DOWNLOAD = range(2)
 
@@ -113,26 +121,34 @@ def start(update, context):
     context.user_data["url"] = url
     logger.info("User %s started the conversation with '%s'.",
                 user.first_name, url)
-    # Build InlineKeyboard where each button has a displayed text
-    # and a string as callback_data
-    # The keyboard is a list of button rows, where each row is in turn
-    # a list (hence `[[...]]`).
+    
     if is_supported(url):
-        keyboard = [
-            [
-                InlineKeyboardButton(
-                    "Download Best Format", callback_data=CALLBACK_BEST_FORMAT),
-                InlineKeyboardButton(
-                    "Select Format", callback_data=CALLBACK_SELECT_FORMAT),
-                # TODO add abort button
-                # InlineKeyboardButton("Abort", callback_data=CALLBACK_ABORT),
+        # If DEFAULT_OUTPUT_FORMAT is set, start downloading immediately
+        if DEFAULT_OUTPUT_FORMAT:
+            logger.info(f"Auto-downloading with default format: {DEFAULT_OUTPUT_FORMAT}")
+            
+            # Start download immediately with best format and default output
+            # The DownloadTask will handle all progress messaging
+            data = TaskData(url, CALLBACK_LOCAL, CALLBACK_BEST_FORMAT, update, DEFAULT_OUTPUT_FORMAT)
+            task = DownloadTask(data)
+            task.downloadVideo()
+            return ConversationHandler.END
+        else:
+            # Show normal format selection if no default is configured
+            keyboard = [
+                [
+                    InlineKeyboardButton(
+                        "Download Best Format", callback_data=CALLBACK_BEST_FORMAT),
+                    InlineKeyboardButton(
+                        "Select Format", callback_data=CALLBACK_SELECT_FORMAT),
+                    # TODO add abort button
+                    # InlineKeyboardButton("Abort", callback_data=CALLBACK_ABORT),
+                ]
             ]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        # Send message with text and appended InlineKeyboard
-        update.message.reply_text(
-            "Do you want me to download '%s' ?" % url, reply_markup=reply_markup)
-        return OUTPUT
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            update.message.reply_text(
+                "Do you want me to download '%s' ?" % url, reply_markup=reply_markup)
+            return OUTPUT
     else:
         logger.info("Invalid url requested: '%s'", url)
         update.message.reply_text("I can't download your request '%s' 😤" % url)
@@ -191,12 +207,20 @@ def select_source_format(update, context):
 def select_output_format(update, context):
     """
     A stage asking the user for the desired output media format.
-    Now goes directly to download since we only have local storage.
+    If DEFAULT_OUTPUT_FORMAT is set, skip this and go directly to download.
     """
     logger.info("output()")
     query = update.callback_query
     context.user_data[CALLBACK_SELECT_FORMAT] = query.data
     query.answer()
+    
+    # Check if default output format is configured
+    if DEFAULT_OUTPUT_FORMAT:
+        logger.info(f"Using default output format: {DEFAULT_OUTPUT_FORMAT}")
+        # Go directly to download with the default format
+        return download_media_with_default_format(update, context)
+    
+    # Show format selection if no default is set
     keyboard = [
         [
             InlineKeyboardButton("MP4", callback_data=CALLBACK_MP4),
@@ -208,6 +232,26 @@ def select_output_format(update, context):
         text="Choose Output Format", reply_markup=reply_markup
     )
     return DOWNLOAD
+
+
+def download_media_with_default_format(update, context):
+    """
+    Download media using the default output format (when DEFAULT_OUTPUT_FORMAT is set).
+    """
+    logger.info("download() with default format")
+    selected_format = context.user_data[CALLBACK_SELECT_FORMAT]
+    url = context.user_data["url"]
+    output_format = DEFAULT_OUTPUT_FORMAT
+    
+    query = update.callback_query
+    query.edit_message_text(text=f"Thank you for your order!🧑‍🍳\nI will start cooking following recipe🧾\n\nurl: {url} \nformat: {selected_format}\noutput: {output_format}\n😋😋😋😋",disable_web_page_preview=True)
+    
+    # Always use local storage now, pass output_format to TaskData
+    data = TaskData(url, CALLBACK_LOCAL, selected_format, update, output_format)
+    task = DownloadTask(data)
+    task.downloadVideo()
+
+    return ConversationHandler.END
 
 
 def download_media(update, context):
@@ -222,8 +266,8 @@ def download_media(update, context):
     
     query.edit_message_text(text=f"Thank you for your order!🧑‍🍳\nI will start cooking following recipe🧾\n\nurl: {url} \nformat: {selected_format}\noutput: {output_format}\n😋😋😋😋",disable_web_page_preview=True)
     
-    # Always use local storage now
-    data = TaskData(url, CALLBACK_LOCAL, selected_format, update)
+    # Always use local storage now, pass output_format to TaskData
+    data = TaskData(url, CALLBACK_LOCAL, selected_format, update, output_format)
     task = DownloadTask(data)
     task.downloadVideo()
 
@@ -238,6 +282,7 @@ def main():
     dp = updater.dispatcher
 
     # Add conversation handler with simplified states (OUTPUT and DOWNLOAD only)
+    # If DEFAULT_OUTPUT_FORMAT is set, we might skip the DOWNLOAD state for manual selection
     conv_handler = ConversationHandler(
         entry_points=[MessageHandler(Filters.text & ~Filters.command, start)],
         states={

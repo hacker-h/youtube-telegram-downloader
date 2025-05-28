@@ -6,6 +6,7 @@ services:
             - './bot.env'
         environment:
             - LOCAL_STORAGE_DIR=/home/bot/data
+            - DEFAULT_OUTPUT_FORMAT=mp3
         volumes:
             - ./data:/home/bot/data
         restart: unless-stopped
