@@ -79,6 +79,8 @@ Note that if `TRUSTED_USER_IDS` is set the bot will not reply to any users which
 - `BOT_TOKEN`: Your Telegram bot token (required)
 - `TRUSTED_USER_IDS`: Comma-separated list of user IDs allowed to use the bot (optional, defaults to allowing anyone)
 - `LOCAL_STORAGE_DIR`: Directory where downloaded files are stored (default: `/home/bot/data` in container, mapped to `./data` on host)
+- `DEFAULT_OUTPUT_FORMAT`: Skip format selection and use this format (optional, values: `mp3`, `mp4`)
+- `DEFAULT_STORAGE_BACKEND`: Skip storage selection and use this backend (optional, values: `local`, `gdrive`, `nextcloud`, `proton`)
 
 ### Docker Compose Configuration
 
@@ -86,11 +88,57 @@ The `docker-compose.yml` file includes:
 - Volume mount for persistent storage: `./data:/home/bot/data`
 - Environment variable for storage directory: `LOCAL_STORAGE_DIR=/home/bot/data`
 
+## Cloud Storage Sync (Optional)
+
+The docker-compose stack includes **modular rclone sync services** with separate containers per backend.
+
+### Supported Backends
+- ✅ **Google Drive** (`rclone-gdrive`)
+- ✅ **Nextcloud** (`rclone-nextcloud`)
+- ✅ **Proton Drive** (`rclone-proton`)
+- ➕ **Easily extensible** for more backends
+
+### Quick Setup
+```bash
+# Interactive Google Drive setup
+./setup-rclone.sh
+
+# Test the configuration
+./test-rclone.sh
+
+# Start with Google Drive sync
+docker compose --profile gdrive up -d
+```
+
+### Manual Setup
+```bash
+# Create directories
+mkdir -p rclone-config rclone-logs scripts
+mkdir -p data/gdrive data/nextcloud data/proton
+
+# Configure cloud storage
+docker run -it --rm \
+  -v $(pwd)/rclone-config:/config \
+  rclone/rclone:latest \
+  config --config /config/rclone.conf
+
+# Start with specific backend
+docker compose --profile gdrive up -d
+```
+
+📖 **Setup Guides:**
+- **Quick Setup:** [RCLONE_SETUP.md](RCLONE_SETUP.md) 
+- **Google Drive API:** [docs/GOOGLE_DRIVE_SETUP.md](docs/GOOGLE_DRIVE_SETUP.md)
+
 ## Features
 
 - [x] Interact with the user
 - [x] Automatically download videos from URL provided via message
     - [x] Code cleanup
+    - [x] Real-time progress tracking
+    - [x] Intelligent error handling
+    - [x] Fast URL validation
+    - [x] **Dynamic storage backend selection**
     - [ ] Audio Quality selectable
     - [ ] Audio Format selectable
     - [ ] Audio Quality Default Value selectable
@@ -98,10 +146,25 @@ The `docker-compose.yml` file includes:
     - [ ] Handle Video Playlists
     - [ ] Handle multiple URLs in one message
     - [ ] Use multiple threads for more performance
+- [x] **Storage Backends**
+    - [x] Local Storage (always available)
+    - [x] **Dynamic backend detection** from rclone config
+    - [x] **User choice per download** (if multiple backends available)
+    - [x] **Default backend configuration** (skip selection)
+    - [x] **Volume-based routing** (each backend has its own directory)
 - [x] Automatically save downloaded content to local storage
     - [x] Local Storage
         - [x] Storage directory is configurable
-    
+- [x] **Cloud Storage Sync (NEW!)**
+    - [x] Modular rclone architecture (docker-compose stack)
+    - [x] Separate containers per backend (gdrive, nextcloud, proton)
+    - [x] Volume-based routing and optional services
+    - [x] Shared sync script and comprehensive monitoring
+- [x] **Bot Commands**
+    - [x] `/help` - Show comprehensive help
+    - [x] `/ls` - List downloaded files
+    - [x] `/search` - Search files by name
+    - [x] `/whoami` - Show user ID
 - [x] Secure your bot against unauthorized access
 - [x] Bot can be run as a Container Image
 - [ ] Container Image available on Docker Hub

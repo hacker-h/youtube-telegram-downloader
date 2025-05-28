@@ -1,4 +1,3 @@
-version: '3.3'
 services:
     youtube-telegram-downloader:
         build: .
@@ -9,4 +8,23 @@ services:
             - DEFAULT_OUTPUT_FORMAT=mp3
         volumes:
             - ./data:/home/bot/data
+            - ./rclone-config:/home/bot/rclone-config:ro
         restart: unless-stopped
+
+    # Google Drive sync service
+    rclone-gdrive:
+        image: rclone/rclone:latest
+        container_name: rclone-gdrive
+        profiles: ["gdrive"]
+        env_file:
+            - './rclone-gdrive.env'
+        volumes:
+            - ./data/gdrive:/data/gdrive:ro
+            - ./rclone-config:/config:ro
+            - ./rclone-logs:/logs
+            - ./scripts/rclone-sync.sh:/usr/local/bin/rclone-sync.sh:ro
+        entrypoint: ["/bin/sh"]
+        command: ["/usr/local/bin/rclone-sync.sh"]
+        restart: unless-stopped
+        depends_on:
+            - youtube-telegram-downloader

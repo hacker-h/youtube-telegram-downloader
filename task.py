@@ -41,12 +41,13 @@ load_dotenv(dotenv_path='./bot.env')
 BOT_TOKEN = os.getenv('BOT_TOKEN', None)
 
 class TaskData:
-    def __init__(self, url, storage, selected_format, update, output_format='mp3') -> None:
+    def __init__(self, url, storage, selected_format, update, output_format='mp3', storage_manager=None) -> None:
         self.url = url
         self.storage = storage
         self.selected_format = selected_format
         self.update = update
         self.output_format = output_format
+        self.storage_manager = storage_manager
         
 class DownloadTask:
     def __init__(self, taskData) -> None:
@@ -69,7 +70,7 @@ class DownloadTask:
     def downloadVideo(self):
         """
         Download the selected media, convert it to the desired output format,
-        and save it to local storage.
+        and save it to the configured storage backend.
         """
         try:
             # Send progress message with unique session identifier
@@ -83,9 +84,18 @@ class DownloadTask:
             logger.info("All settings: %s", self.data)
             logger.info("Video URL to download: '%s'", self.data.url)
             logger.info("Output format: '%s'", self.data.output_format)
+            logger.info("Storage backend: '%s'", self.data.storage)
             
-            # Get the local storage directory from environment variable
-            storage_dir = os.getenv('LOCAL_STORAGE_DIR', './data')
+            # Get storage path from storage manager
+            if self.data.storage_manager:
+                storage_dir = self.data.storage_manager.ensure_storage_path(self.data.storage)
+                backend_name = self.data.storage_manager.get_backend_display_name(self.data.storage)
+                logger.info(f"Using storage backend: {backend_name} -> {storage_dir}")
+            else:
+                # Fallback to environment variable
+                storage_dir = os.getenv('LOCAL_STORAGE_DIR', './data')
+                backend_name = "Local Storage"
+                logger.info(f"Using fallback storage: {storage_dir}")
             
             # Configure yt-dlp options based on output format
             YT_DLP_OPTIONS = {
@@ -126,29 +136,36 @@ class DownloadTask:
             logger.info(f"File downloaded to: {final_media_name}")
 
             # Update message to show saving progress
-            self.bot.edit_message_text(f"💾 Saving file to local storage...", self.chat_id, self.progress_message_id)
+            self.bot.edit_message_text(f"💾 Saving file to {backend_name}...", self.chat_id, self.progress_message_id)
 
             try:
-                # Use local storage backend
+                # Use local storage backend (files are already saved by yt-dlp)
                 backend = LocalStorage()
                 backend.upload(final_media_name)
                 
-                # Final success message
+                # Final success message with backend info
                 filename = os.path.basename(final_media_name)
+                cloud_info = ""
+                if self.data.storage_manager and self.data.storage_manager.is_cloud_backend(self.data.storage):
+                    cloud_info = f"\n☁️ Cloud sync: Will be synced to {self.data.storage} automatically"
+                
                 self.bot.edit_message_text(
                     f"✅ Download completed!\n\n"
                     f"📁 File: {filename}\n"
                     f"🎵 Format: {self.data.output_format.upper()}\n"
-                    f"📂 Location: {storage_dir}/\n"
+                    f"💾 Backend: {backend_name}\n"
+                    f"📂 Location: {storage_dir}/"
+                    f"{cloud_info}\n"
                     f"🔗 URL: {self.data.url[:50]}...", 
                     self.chat_id, 
                     self.progress_message_id,
                     disable_web_page_preview=True
                 )
             except Exception as e:
-                logger.error(f"Local storage failed: {e}")
+                logger.error(f"Storage backend failed: {e}")
                 self.bot.edit_message_text(
                     f"❌ Error saving file: {final_media_name}\n"
+                    f"Backend: {backend_name}\n"
                     f"Error: {str(e)[:100]}", 
                     self.chat_id, 
                     self.progress_message_id

@@ -14,6 +14,7 @@ import os
 import yt_dlp
 from hurry.filesize import size
 from task import TaskData, DownloadTask
+from backends.storage_manager import StorageManager
 
 # Enable logging
 logging.basicConfig(
@@ -49,8 +50,8 @@ if DEFAULT_OUTPUT_FORMAT:
         logger.warning(f"Invalid DEFAULT_OUTPUT_FORMAT '{DEFAULT_OUTPUT_FORMAT}', must be 'mp3' or 'mp4'. Ignoring.")
         DEFAULT_OUTPUT_FORMAT = ''
 
-# Stages - removed STORAGE stage since we only have local storage
-OUTPUT, DOWNLOAD = range(2)
+# Stages - added STORAGE stage for backend selection
+STORAGE, OUTPUT, DOWNLOAD = range(3)
 
 # Callback data
 CALLBACK_MP4 = "mp4"
@@ -59,6 +60,9 @@ CALLBACK_LOCAL = "local"
 CALLBACK_BEST_FORMAT = "best"
 CALLBACK_SELECT_FORMAT = "select_format"
 CALLBACK_ABORT = "abort"
+
+# Initialize storage manager
+storage_manager = StorageManager()
 
 
 def quick_url_check(url):
@@ -432,44 +436,29 @@ def start(update, context):
     # Send immediate feedback that bot is alive and processing
     checking_msg = update.message.reply_text("🔍 Checking URL...")
     
-    # If DEFAULT_OUTPUT_FORMAT is set, start downloading immediately
-    if DEFAULT_OUTPUT_FORMAT:
-        logger.info(f"Auto-downloading with default format: {DEFAULT_OUTPUT_FORMAT}")
-        
-        # Delete the "checking" message
-        try:
-            checking_msg.delete()
-        except:
-            pass
-        
-        # Start download immediately with best format and default output
-        # The DownloadTask will handle all progress messaging and error handling
-        data = TaskData(url, CALLBACK_LOCAL, CALLBACK_BEST_FORMAT, update, DEFAULT_OUTPUT_FORMAT)
-        task = DownloadTask(data)
-        task.downloadVideo()
-        return ConversationHandler.END
+    # Delete the "checking" message
+    try:
+        checking_msg.delete()
+    except:
+        pass
+    
+    # Check if we should ask for storage backend
+    if storage_manager.should_ask_for_backend():
+        # Multiple backends available, ask user to choose
+        return select_storage_backend(update, context)
     else:
-        # Delete the "checking" message
-        try:
-            checking_msg.delete()
-        except:
-            pass
+        # Use default backend or only available backend
+        default_backend = storage_manager.get_default_backend()
+        if default_backend:
+            context.user_data["storage_backend"] = default_backend
+            logger.info(f"Using default storage backend: {default_backend}")
+        else:
+            # Only local storage available
+            context.user_data["storage_backend"] = "local"
+            logger.info("Using local storage (only backend available)")
         
-        # Show format selection for manual downloads
-        keyboard = [
-            [
-                InlineKeyboardButton(
-                    "Download Best Format", callback_data=CALLBACK_BEST_FORMAT),
-                InlineKeyboardButton(
-                    "Select Format", callback_data=CALLBACK_SELECT_FORMAT),
-                # TODO add abort button
-                # InlineKeyboardButton("Abort", callback_data=CALLBACK_ABORT),
-            ]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        update.message.reply_text(
-            "Do you want me to download '%s' ?" % url, reply_markup=reply_markup)
-        return OUTPUT
+        # Proceed to format selection or direct download
+        return proceed_to_format_selection(update, context)
 
 
 def build_menu(buttons, n_cols, header_buttons=None, footer_buttons=None):
@@ -559,10 +548,10 @@ def download_media_with_default_format(update, context):
     selected_format = context.user_data[CALLBACK_SELECT_FORMAT]
     url = context.user_data["url"]
     output_format = DEFAULT_OUTPUT_FORMAT
+    backend = context.user_data.get("storage_backend", "local")
     
-    # Always use local storage now, pass output_format to TaskData
-    # The DownloadTask will handle all progress messaging
-    data = TaskData(url, CALLBACK_LOCAL, selected_format, update, output_format)
+    # Pass storage_manager to TaskData
+    data = TaskData(url, backend, selected_format, update, output_format, storage_manager)
     task = DownloadTask(data)
     task.downloadVideo()
 
@@ -578,14 +567,118 @@ def download_media(update, context):
     selected_format = context.user_data[CALLBACK_SELECT_FORMAT]
     url = context.user_data["url"]
     output_format = query.data
+    backend = context.user_data.get("storage_backend", "local")
     
-    # Always use local storage now, pass output_format to TaskData
-    # The DownloadTask will handle all progress messaging
-    data = TaskData(url, CALLBACK_LOCAL, selected_format, update, output_format)
+    # Pass storage_manager to TaskData
+    data = TaskData(url, backend, selected_format, update, output_format, storage_manager)
     task = DownloadTask(data)
     task.downloadVideo()
 
     return ConversationHandler.END
+
+
+def select_storage_backend(update, context):
+    """
+    A stage asking the user for the storage backend.
+    """
+    logger.info("select_storage_backend()")
+    
+    available_backends = storage_manager.get_available_backends()
+    
+    # If only one backend available, skip selection
+    if len(available_backends) == 1:
+        backend = list(available_backends.keys())[0]
+        context.user_data["storage_backend"] = backend
+        logger.info(f"Only one backend available, auto-selecting: {backend}")
+        return proceed_to_format_selection(update, context)
+    
+    # Build keyboard with available backends
+    button_list = []
+    for backend_id, backend_name in available_backends.items():
+        if backend_id == "local":
+            emoji = "💾"
+        else:
+            emoji = "☁️"
+        button_list.append(InlineKeyboardButton(
+            f"{emoji} {backend_name}", callback_data=f"storage_{backend_id}"))
+    
+    reply_markup = InlineKeyboardMarkup(build_menu(button_list, n_cols=1))
+    
+    url = context.user_data["url"]
+    update.message.reply_text(
+        f"🗂️ **Choose Storage Backend**\n\nWhere should I save the download from:\n`{url}`", 
+        reply_markup=reply_markup,
+        parse_mode='Markdown'
+    )
+    return STORAGE
+
+
+def handle_storage_selection(update, context):
+    """
+    Handle storage backend selection and proceed to format selection.
+    """
+    logger.info("handle_storage_selection()")
+    query = update.callback_query
+    query.answer()
+    
+    # Extract backend from callback data (format: "storage_backend_name")
+    backend = query.data.replace("storage_", "")
+    context.user_data["storage_backend"] = backend
+    
+    backend_name = storage_manager.get_backend_display_name(backend)
+    logger.info(f"User selected storage backend: {backend} ({backend_name})")
+    
+    # Update message to show selection
+    query.edit_message_text(
+        f"✅ **Storage Selected:** {backend_name}\n\nProceeding to format selection...",
+        parse_mode='Markdown'
+    )
+    
+    return proceed_to_format_selection(update, context)
+
+
+def proceed_to_format_selection(update, context):
+    """
+    Proceed to format selection after storage backend is determined.
+    """
+    url = context.user_data["url"]
+    
+    # If DEFAULT_OUTPUT_FORMAT is set, start downloading immediately
+    if DEFAULT_OUTPUT_FORMAT:
+        logger.info(f"Auto-downloading with default format: {DEFAULT_OUTPUT_FORMAT}")
+        
+        # Start download immediately with best format and default output
+        backend = context.user_data.get("storage_backend", "local")
+        data = TaskData(url, backend, CALLBACK_BEST_FORMAT, update, DEFAULT_OUTPUT_FORMAT, storage_manager)
+        task = DownloadTask(data)
+        task.downloadVideo()
+        return ConversationHandler.END
+    else:
+        # Show format selection for manual downloads
+        keyboard = [
+            [
+                InlineKeyboardButton(
+                    "Download Best Format", callback_data=CALLBACK_BEST_FORMAT),
+                InlineKeyboardButton(
+                    "Select Format", callback_data=CALLBACK_SELECT_FORMAT),
+            ]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        # Send new message or edit existing one
+        if hasattr(update, 'callback_query') and update.callback_query:
+            # We came from storage selection, edit the message
+            update.callback_query.edit_message_text(
+                f"Do you want me to download '{url}' ?", 
+                reply_markup=reply_markup
+            )
+        else:
+            # Direct entry, send new message
+            update.message.reply_text(
+                f"Do you want me to download '{url}' ?", 
+                reply_markup=reply_markup
+            )
+        return OUTPUT
 
 
 def main():
@@ -595,11 +688,13 @@ def main():
     # Get the dispatcher to register handlers
     dp = updater.dispatcher
 
-    # Add conversation handler with simplified states (OUTPUT and DOWNLOAD only)
-    # If DEFAULT_OUTPUT_FORMAT is set, we might skip the DOWNLOAD state for manual selection
+    # Add conversation handler with storage selection
     conv_handler = ConversationHandler(
         entry_points=[MessageHandler(Filters.text & ~Filters.command, start)],
         states={
+            STORAGE: [
+                CallbackQueryHandler(handle_storage_selection, pattern='^storage_'),
+            ],
             OUTPUT: [
                 CallbackQueryHandler(select_source_format, pattern='^' + CALLBACK_SELECT_FORMAT + '$'),
                 CallbackQueryHandler(select_output_format, pattern='^' + CALLBACK_BEST_FORMAT + '$'),
