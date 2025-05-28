@@ -6,6 +6,7 @@ services:
         environment:
             - LOCAL_STORAGE_DIR=/home/bot/data
             - DEFAULT_OUTPUT_FORMAT=mp3
+            - DEFAULT_STORAGE_BACKEND=gdrive
         volumes:
             - ./data:/home/bot/data
             - ./rclone-config:/home/bot/rclone-config:ro
