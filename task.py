@@ -161,10 +161,31 @@ class DownloadTask:
                 except Exception as e:
                     logger.warning(f"Could not delete original message: {e}")
                     
+        except yt_dlp.utils.DownloadError as e:
+            logger.error(f"yt-dlp Download failed: {e}")
+            if self.progress_message_id:
+                # Interpret yt-dlp errors intelligently
+                error_str = str(e).lower()
+                if 'video unavailable' in error_str or 'private video' in error_str:
+                    error_msg = "❌ Video unavailable!\n\nThis video is private, deleted, or restricted in your region."
+                elif 'age-restricted' in error_str or 'sign in' in error_str:
+                    error_msg = "❌ Age-restricted content!\n\nThis video requires sign-in or is age-restricted."
+                elif 'copyright' in error_str or 'blocked' in error_str:
+                    error_msg = "❌ Copyright blocked!\n\nThis video is blocked due to copyright restrictions."
+                elif 'playlist' in error_str and 'empty' in error_str:
+                    error_msg = "❌ Empty playlist!\n\nThis playlist is empty or all videos are unavailable."
+                elif 'unsupported url' in error_str or 'no video formats' in error_str:
+                    error_msg = "❌ Unsupported URL!\n\nThis platform or URL format is not supported by yt-dlp."
+                elif 'network' in error_str or 'connection' in error_str:
+                    error_msg = "❌ Network error!\n\nCannot connect to the video source. Please try again later."
+                else:
+                    error_msg = f"❌ Download failed!\n\n{str(e)[:150]}..."
+                
+                self.bot.edit_message_text(error_msg, self.chat_id, self.progress_message_id)
         except Exception as e:
             logger.error(f"Download failed: {e}")
             if self.progress_message_id:
-                self.bot.edit_message_text(f"❌ Download failed: {str(e)[:100]}", self.chat_id, self.progress_message_id)
+                self.bot.edit_message_text(f"❌ Unexpected error!\n\n{str(e)[:100]}...", self.chat_id, self.progress_message_id)
         finally:
             # Ensure progress bar is cleaned up
             if self.pbar:

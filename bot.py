@@ -61,46 +61,32 @@ CALLBACK_SELECT_FORMAT = "select_format"
 CALLBACK_ABORT = "abort"
 
 
-def is_supported(url):
+def quick_url_check(url):
     """
-    Checks whether the URL type is eligible for yt-dlp.\n
-    Returns True or False.
+    Fast static URL validation without API calls.
+    Returns: (is_likely_valid, error_message)
     """
-    try:
-        # First check for obvious incomplete URLs
-        if 'youtube.com/watch?v=' in url:
-            video_id = url.split('v=')[1].split('&')[0]
-            if not video_id or video_id in ['VIDEO_ID', 'VIDEOID', 'your_video_id', 'example']:
-                logger.info(f"Detected placeholder or empty video ID: '{video_id}'")
-                return False
-        
-        # Check for incomplete YouTube URLs without video ID
-        if url.endswith('youtube.com/watch?v') or url.endswith('youtube.com/watch?v='):
-            logger.info("Detected incomplete YouTube URL without video ID")
-            return False
-        
-        with yt_dlp.YoutubeDL({'quiet': True}) as ydl:
-            info = ydl.extract_info(url, download=False)
-            
-            # Check if yt-dlp redirected to YouTube recommended (unwanted)
-            if info and info.get('id') == 'recommended':
-                logger.info("URL redirected to YouTube recommended page - treating as invalid")
-                return False
-            
-            # Check if we got a playlist when we expected a single video
-            if info and info.get('_type') == 'playlist':
-                entries = info.get('entries', [])
-                if not entries or len(entries) == 0:
-                    logger.info("URL points to empty playlist - treating as invalid")
-                    return False
-            
-            return True
-    except yt_dlp.utils.DownloadError as e:
-        logger.info(f"yt-dlp DownloadError for URL '{url}': {e}")
-        return False
-    except Exception as e:
-        logger.warning(f"Unexpected error checking URL '{url}': {e}")
-        return False
+    # Check for obvious incomplete URLs
+    if 'youtube.com/watch?v=' in url:
+        video_id = url.split('v=')[1].split('&')[0]
+        if not video_id or video_id in ['VIDEO_ID', 'VIDEOID', 'your_video_id', 'example']:
+            return False, f"❌ Placeholder video ID detected: `{video_id}`\n\nPlease replace with a real YouTube video ID!"
+    
+    # Check for incomplete YouTube URLs without video ID
+    if url.endswith('youtube.com/watch?v') or url.endswith('youtube.com/watch?v='):
+        return False, "❌ Incomplete YouTube URL!\n\nPlease send a complete URL like:\n`https://www.youtube.com/watch?v=dQw4w9WgXcQ`"
+    
+    # Check for supported platforms
+    supported_domains = ['youtube.com', 'youtu.be', 'twitch.tv', 'vimeo.com', 'soundcloud.com', 'bandcamp.com']
+    if not any(domain in url.lower() for domain in supported_domains):
+        return False, "❌ Unsupported platform!\n\nI support YouTube, Twitch, Vimeo and other platforms supported by yt-dlp.\nSend `/help` for more info."
+    
+    # Basic URL format check
+    if not url.startswith(('http://', 'https://')):
+        return False, "❌ Invalid URL format!\n\nPlease send a complete URL starting with http:// or https://"
+    
+    return True, None
+
 
 
 def is_trusted(user_id):
@@ -437,58 +423,53 @@ def start(update, context):
     logger.info("User %s started the conversation with '%s'.",
                 user.first_name, url)
     
-    if is_supported(url):
-        # If DEFAULT_OUTPUT_FORMAT is set, start downloading immediately
-        if DEFAULT_OUTPUT_FORMAT:
-            logger.info(f"Auto-downloading with default format: {DEFAULT_OUTPUT_FORMAT}")
-            
-            # Start download immediately with best format and default output
-            # The DownloadTask will handle all progress messaging
-            data = TaskData(url, CALLBACK_LOCAL, CALLBACK_BEST_FORMAT, update, DEFAULT_OUTPUT_FORMAT)
-            task = DownloadTask(data)
-            task.downloadVideo()
-            return ConversationHandler.END
-        else:
-            # Show normal format selection if no default is configured
-            keyboard = [
-                [
-                    InlineKeyboardButton(
-                        "Download Best Format", callback_data=CALLBACK_BEST_FORMAT),
-                    InlineKeyboardButton(
-                        "Select Format", callback_data=CALLBACK_SELECT_FORMAT),
-                    # TODO add abort button
-                    # InlineKeyboardButton("Abort", callback_data=CALLBACK_ABORT),
-                ]
-            ]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            update.message.reply_text(
-                "Do you want me to download '%s' ?" % url, reply_markup=reply_markup)
-            return OUTPUT
-    else:
-        logger.info("Invalid url requested: '%s'", url)
-        
-        # Provide more specific error messages
-        error_msg = "❌ I can't download this URL"
-        
-        if url.endswith('youtube.com/watch?v') or url.endswith('youtube.com/watch?v='):
-            error_msg = "❌ Incomplete YouTube URL!\n\n" \
-                       "Please send a complete URL like:\n" \
-                       "`https://www.youtube.com/watch?v=dQw4w9WgXcQ`"
-        elif 'youtube.com/watch?v=' in url:
-            video_id = url.split('v=')[1].split('&')[0] if 'v=' in url else ''
-            if video_id in ['VIDEO_ID', 'VIDEOID', 'your_video_id', 'example']:
-                error_msg = f"❌ Placeholder video ID detected: `{video_id}`\n\n" \
-                           "Please replace with a real YouTube video ID!"
-        elif not any(domain in url.lower() for domain in ['youtube.com', 'youtu.be', 'twitch.tv', 'vimeo.com']):
-            error_msg = "❌ Unsupported platform!\n\n" \
-                       "I support YouTube, Twitch, Vimeo and other platforms supported by yt-dlp.\n" \
-                       "Send `/help` for more info."
-        else:
-            error_msg = f"❌ Cannot download from this URL: `{url[:50]}...`\n\n" \
-                       "Please check if the URL is correct and accessible."
-        
+    # Fast static URL validation first
+    is_valid_quick, error_msg = quick_url_check(url)
+    if not is_valid_quick:
         update.message.reply_text(error_msg, parse_mode='Markdown')
         return ConversationHandler.END
+    
+    # Send immediate feedback that bot is alive and processing
+    checking_msg = update.message.reply_text("🔍 Checking URL...")
+    
+    # If DEFAULT_OUTPUT_FORMAT is set, start downloading immediately
+    if DEFAULT_OUTPUT_FORMAT:
+        logger.info(f"Auto-downloading with default format: {DEFAULT_OUTPUT_FORMAT}")
+        
+        # Delete the "checking" message
+        try:
+            checking_msg.delete()
+        except:
+            pass
+        
+        # Start download immediately with best format and default output
+        # The DownloadTask will handle all progress messaging and error handling
+        data = TaskData(url, CALLBACK_LOCAL, CALLBACK_BEST_FORMAT, update, DEFAULT_OUTPUT_FORMAT)
+        task = DownloadTask(data)
+        task.downloadVideo()
+        return ConversationHandler.END
+    else:
+        # Delete the "checking" message
+        try:
+            checking_msg.delete()
+        except:
+            pass
+        
+        # Show format selection for manual downloads
+        keyboard = [
+            [
+                InlineKeyboardButton(
+                    "Download Best Format", callback_data=CALLBACK_BEST_FORMAT),
+                InlineKeyboardButton(
+                    "Select Format", callback_data=CALLBACK_SELECT_FORMAT),
+                # TODO add abort button
+                # InlineKeyboardButton("Abort", callback_data=CALLBACK_ABORT),
+            ]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        update.message.reply_text(
+            "Do you want me to download '%s' ?" % url, reply_markup=reply_markup)
+        return OUTPUT
 
 
 def build_menu(buttons, n_cols, header_buttons=None, footer_buttons=None):
