@@ -766,17 +766,25 @@ def execute_ls_command(update_or_query, backend, backend_name):
             chunks = format_file_list(media_files, title)
             message = chunks[0] if chunks else "📁 No files found"
         
-        if hasattr(update_or_query, 'callback_query'):
-            # From button selection
+        # Check if this is from a callback query (button) or direct command
+        if hasattr(update_or_query, 'callback_query') and update_or_query.callback_query:
+            # From button selection - use edit_message_text
+            update_or_query.callback_query.edit_message_text(message, parse_mode='Markdown')
+        elif hasattr(update_or_query, 'edit_message_text'):
+            # This is a CallbackQuery object directly
             update_or_query.edit_message_text(message, parse_mode='Markdown')
         else:
-            # From direct command
+            # From direct command - use reply_text
             update_or_query.message.reply_text(message, parse_mode='Markdown')
             
     except Exception as e:
         logger.error(f"Error in ls command for backend {backend}: {e}")
         error_msg = f"❌ Error listing files from {backend_name}: {str(e)[:100]}"
-        if hasattr(update_or_query, 'callback_query'):
+        
+        # Same logic for error messages
+        if hasattr(update_or_query, 'callback_query') and update_or_query.callback_query:
+            update_or_query.callback_query.edit_message_text(error_msg)
+        elif hasattr(update_or_query, 'edit_message_text'):
             update_or_query.edit_message_text(error_msg)
         else:
             update_or_query.message.reply_text(error_msg)
@@ -813,17 +821,25 @@ def execute_search_command(update_or_query, backend, backend_name, search_args):
                 chunks = format_file_list(matching_files, title)
                 message = chunks[0] if chunks else "🔎 No results found"
         
-        if hasattr(update_or_query, 'callback_query'):
-            # From button selection
+        # Check if this is from a callback query (button) or direct command
+        if hasattr(update_or_query, 'callback_query') and update_or_query.callback_query:
+            # From button selection - use edit_message_text
+            update_or_query.callback_query.edit_message_text(message, parse_mode='Markdown')
+        elif hasattr(update_or_query, 'edit_message_text'):
+            # This is a CallbackQuery object directly
             update_or_query.edit_message_text(message, parse_mode='Markdown')
         else:
-            # From direct command
+            # From direct command - use reply_text
             update_or_query.message.reply_text(message, parse_mode='Markdown')
             
     except Exception as e:
         logger.error(f"Error in search command for backend {backend}: {e}")
         error_msg = f"❌ Error searching in {backend_name}: {str(e)[:100]}"
-        if hasattr(update_or_query, 'callback_query'):
+        
+        # Same logic for error messages
+        if hasattr(update_or_query, 'callback_query') and update_or_query.callback_query:
+            update_or_query.callback_query.edit_message_text(error_msg)
+        elif hasattr(update_or_query, 'edit_message_text'):
             update_or_query.edit_message_text(error_msg)
         else:
             update_or_query.message.reply_text(error_msg)
