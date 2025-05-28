@@ -12,7 +12,6 @@ import os
 import yt_dlp
 from hurry.filesize import size
 import telegram
-from telegram_progress import tg_tqdm
 from dotenv import load_dotenv
 import time
 
@@ -71,7 +70,7 @@ class DownloadTask:
             self.progress_message_id = progress_msg.message_id
             
             # Initialize progress bar
-            self.pbar = tg_tqdm(BOT_TOKEN, self.chat_id, self.progress_message_id, desc=f"Downloading #{session_id}... ", total=100)
+            self.pbar = CustomProgressTracker(self.bot, self.chat_id, self.progress_message_id)
 
             logger.info("All settings: %s", self.data)
             logger.info("Video URL to download: '%s'", self.data.url)
@@ -171,22 +170,65 @@ class DownloadTask:
         try:
             if d['status'] == 'finished':
                 logger.info("Download finished, updating progress to 100%")
-                self.pbar.update(100 - self.pbar.n)  # Update to 100%
+                # Show 100% completion
+                total_bytes = d.get('total_bytes') or d.get('total_bytes_estimate')
+                downloaded_bytes = d.get('downloaded_bytes', total_bytes)
+                self.pbar.update(100, downloaded_bytes, total_bytes)
                 
             elif d['status'] == 'downloading':
-                if '_percent_str' in d and d['_percent_str']:
+                # Extract progress information from yt-dlp
+                downloaded_bytes = d.get('downloaded_bytes', 0)
+                total_bytes = d.get('total_bytes') or d.get('total_bytes_estimate')
+                
+                # Calculate percentage
+                if total_bytes and total_bytes > 0:
+                    percent = (downloaded_bytes / total_bytes) * 100
+                    self.pbar.update(percent, downloaded_bytes, total_bytes)
+                elif '_percent_str' in d and d['_percent_str']:
+                    # Fallback to yt-dlp's percentage if file size unknown
                     try:
                         percent = float(d['_percent_str'].replace('%', ''))
-                        # Update progress bar with current percentage
-                        progress_diff = percent - self.pbar.n
-                        if progress_diff > 0:
-                            self.pbar.update(progress_diff)
-                            logger.info(f"Download progress: {percent}%")
+                        self.pbar.update(percent)
                     except (ValueError, TypeError) as e:
                         logger.warning(f"Could not parse progress percentage: {e}")
                         
         except Exception as e:
             logger.error(f"Error in progress hook: {e}")
+
+class CustomProgressTracker:
+    def __init__(self, bot, chat_id, message_id):
+        self.bot = bot
+        self.chat_id = chat_id
+        self.message_id = message_id
+        self.last_percent = 0
+        self.last_update_time = 0
+        self.total_size = None
+        self.downloaded_size = None
+        
+    def update(self, percent, downloaded_bytes=None, total_bytes=None):
+        """Update progress with percentage and optional file size info"""
+        current_time = time.time()
+        
+        # Only update if percentage changed by at least 5% or 2 seconds passed
+        if abs(percent - self.last_percent) >= 5 or (current_time - self.last_update_time) >= 2:
+            try:
+                if downloaded_bytes and total_bytes:
+                    downloaded_mb = downloaded_bytes / (1024 * 1024)
+                    total_mb = total_bytes / (1024 * 1024)
+                    progress_text = f"📥 Downloading... {percent:.0f}% ({downloaded_mb:.1f}/{total_mb:.1f}MB)"
+                else:
+                    progress_text = f"📥 Downloading... {percent:.0f}%"
+                
+                self.bot.edit_message_text(progress_text, self.chat_id, self.message_id)
+                self.last_percent = percent
+                self.last_update_time = current_time
+                logger.info(f"Progress updated: {percent:.0f}%")
+            except Exception as e:
+                logger.warning(f"Failed to update progress message: {e}")
+    
+    def close(self):
+        """Cleanup when download is finished"""
+        pass
 
 if __name__ == "__main__":
    bot = telegram.Bot('')

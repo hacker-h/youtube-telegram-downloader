@@ -67,10 +67,39 @@ def is_supported(url):
     Returns True or False.
     """
     try:
-        with yt_dlp.YoutubeDL() as ydl:
-            ydl.extract_info(url, download=False)
+        # First check for obvious incomplete URLs
+        if 'youtube.com/watch?v=' in url:
+            video_id = url.split('v=')[1].split('&')[0]
+            if not video_id or video_id in ['VIDEO_ID', 'VIDEOID', 'your_video_id', 'example']:
+                logger.info(f"Detected placeholder or empty video ID: '{video_id}'")
+                return False
+        
+        # Check for incomplete YouTube URLs without video ID
+        if url.endswith('youtube.com/watch?v') or url.endswith('youtube.com/watch?v='):
+            logger.info("Detected incomplete YouTube URL without video ID")
+            return False
+        
+        with yt_dlp.YoutubeDL({'quiet': True}) as ydl:
+            info = ydl.extract_info(url, download=False)
+            
+            # Check if yt-dlp redirected to YouTube recommended (unwanted)
+            if info and info.get('id') == 'recommended':
+                logger.info("URL redirected to YouTube recommended page - treating as invalid")
+                return False
+            
+            # Check if we got a playlist when we expected a single video
+            if info and info.get('_type') == 'playlist':
+                entries = info.get('entries', [])
+                if not entries or len(entries) == 0:
+                    logger.info("URL points to empty playlist - treating as invalid")
+                    return False
+            
             return True
-    except yt_dlp.utils.DownloadError:
+    except yt_dlp.utils.DownloadError as e:
+        logger.info(f"yt-dlp DownloadError for URL '{url}': {e}")
+        return False
+    except Exception as e:
+        logger.warning(f"Unexpected error checking URL '{url}': {e}")
         return False
 
 
@@ -310,8 +339,29 @@ def start(update, context):
             return OUTPUT
     else:
         logger.info("Invalid url requested: '%s'", url)
-        update.message.reply_text("I can't download your request '%s' 😤" % url)
-        ConversationHandler.END
+        
+        # Provide more specific error messages
+        error_msg = "❌ I can't download this URL"
+        
+        if url.endswith('youtube.com/watch?v') or url.endswith('youtube.com/watch?v='):
+            error_msg = "❌ Incomplete YouTube URL!\n\n" \
+                       "Please send a complete URL like:\n" \
+                       "`https://www.youtube.com/watch?v=dQw4w9WgXcQ`"
+        elif 'youtube.com/watch?v=' in url:
+            video_id = url.split('v=')[1].split('&')[0] if 'v=' in url else ''
+            if video_id in ['VIDEO_ID', 'VIDEOID', 'your_video_id', 'example']:
+                error_msg = f"❌ Placeholder video ID detected: `{video_id}`\n\n" \
+                           "Please replace with a real YouTube video ID!"
+        elif not any(domain in url.lower() for domain in ['youtube.com', 'youtu.be', 'twitch.tv', 'vimeo.com']):
+            error_msg = "❌ Unsupported platform!\n\n" \
+                       "I support YouTube, Twitch, Vimeo and other platforms supported by yt-dlp.\n" \
+                       "Send `/help` for more info."
+        else:
+            error_msg = f"❌ Cannot download from this URL: `{url[:50]}...`\n\n" \
+                       "Please check if the URL is correct and accessible."
+        
+        update.message.reply_text(error_msg, parse_mode='Markdown')
+        return ConversationHandler.END
 
 
 def build_menu(buttons, n_cols, header_buttons=None, footer_buttons=None):
