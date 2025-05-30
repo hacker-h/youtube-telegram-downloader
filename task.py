@@ -13,15 +13,20 @@ from hurry.filesize import size
 import telegram
 from dotenv import load_dotenv
 import time
+from backends.upload_progress import upload_progress_manager
+from backends.storage_monitor import get_storage_monitor
 
 # Global download counter for session IDs
 download_counter = 0
 
+# Session counter for unique progress tracking
+session_counter = 0
+
 def get_next_session_id():
     """Generate incremental session ID for downloads"""
-    global download_counter
-    download_counter += 1
-    return f"#{download_counter:04d}"
+    global session_counter
+    session_counter += 1
+    return f"[{session_counter:03d}]"
 
 CALLBACK_MP4 = "mp4"
 CALLBACK_MP3 = "mp3"
@@ -65,6 +70,7 @@ class DownloadTask:
         self.bot = telegram.Bot(BOT_TOKEN)
         self.progress_message_id = None
         self.pbar = None
+        self.upload_tracker = None
 
     def downloadVideo(self):
         """
@@ -92,12 +98,64 @@ class DownloadTask:
             if self.data.storage_manager:
                 final_storage_dir = self.data.storage_manager.ensure_storage_path(self.data.storage)
                 backend_name = self.data.storage_manager.get_backend_display_name(self.data.storage)
+                is_cloud_backend = self.data.storage_manager.is_cloud_backend(self.data.storage)
                 logger.info(f"Will download to {temp_download_dir} then move to: {backend_name} -> {final_storage_dir}")
             else:
                 # Fallback to environment variable for local storage
                 final_storage_dir = os.getenv('LOCAL_STORAGE_DIR', './data')
                 backend_name = "Local Storage"
+                is_cloud_backend = False
                 logger.info(f"Will download to {temp_download_dir} then move to: {final_storage_dir}")
+            
+            # Check storage space for cloud backends before download
+            if is_cloud_backend:
+                storage_monitor = get_storage_monitor(BOT_TOKEN)
+                
+                # Update progress message to show storage check
+                self.bot.edit_message_text(f"🔍 Checking {backend_name} storage space...", self.chat_id, self.progress_message_id)
+                
+                # Check storage and send notification if needed
+                storage_ok = storage_monitor.check_and_notify(self.data.storage, self.chat_id)
+                
+                if not storage_ok:
+                    # Storage is low, but continue with download (user has been warned)
+                    logger.warning(f"Storage low for {self.data.storage}, but continuing with download")
+                    
+                    # Update message to show warning but continuing
+                    self.bot.edit_message_text(
+                        f"⚠️ {backend_name} storage is low, but continuing download...\n"
+                        f"🔄 Starting download... {session_id}", 
+                        self.chat_id, 
+                        self.progress_message_id
+                    )
+                    time.sleep(2)  # Give user time to read the warning
+                else:
+                    logger.info(f"Storage check passed for {self.data.storage}")
+            
+            # Check local filesystem space for local backend
+            elif self.data.storage == 'local':
+                storage_monitor = get_storage_monitor(BOT_TOKEN)
+                
+                # Update progress message to show storage check
+                self.bot.edit_message_text(f"🔍 Checking local filesystem space...", self.chat_id, self.progress_message_id)
+                
+                # Check local filesystem and send notification if needed
+                storage_ok = storage_monitor.check_and_notify(self.data.storage, self.chat_id, final_storage_dir)
+                
+                if not storage_ok:
+                    # Storage is low, but continue with download (user has been warned)
+                    logger.warning(f"Local filesystem space low, but continuing with download")
+                    
+                    # Update message to show warning but continuing
+                    self.bot.edit_message_text(
+                        f"⚠️ Local filesystem space is low, but continuing download...\n"
+                        f"🔄 Starting download... {session_id}", 
+                        self.chat_id, 
+                        self.progress_message_id
+                    )
+                    time.sleep(2)  # Give user time to read the warning
+                else:
+                    logger.info(f"Local filesystem check passed")
             
             # Configure yt-dlp options to download to /tmp
             YT_DLP_OPTIONS = {
@@ -153,9 +211,37 @@ class DownloadTask:
                 shutil.move(temp_file_path, final_file_path)
                 logger.info(f"File moved from {temp_file_path} to {final_file_path}")
                 
+                # Start upload progress monitoring for cloud backends
+                if is_cloud_backend:
+                    logger.info(f"Starting upload progress monitoring for cloud backend: {self.data.storage}")
+                    self.upload_tracker = upload_progress_manager.start_upload_monitoring(
+                        bot=self.bot,
+                        chat_id=self.chat_id,
+                        message_id=self.progress_message_id,
+                        backend=self.data.storage,
+                        filename=filename,
+                        timeout=300  # 5 minutes timeout
+                    )
+                    
+                    # Wait a bit for upload to potentially complete
+                    # The upload tracker will update the message automatically
+                    time.sleep(2)
+                    
+                    # Check if upload completed quickly (small files)
+                    if self.upload_tracker and not self.upload_tracker.upload_completed:
+                        # For larger files, the upload tracker will continue monitoring
+                        # and update the message when upload completes
+                        logger.info(f"Upload monitoring active for {filename}")
+                        return  # Let the upload tracker handle the final message
+                
                 # Determine cloud sync info
                 cloud_info = ""
-                if self.data.storage != 'local':
+                if is_cloud_backend:
+                    if self.upload_tracker and self.upload_tracker.upload_completed:
+                        cloud_info = f"\n✅ Uploaded to {self.data.storage} successfully"
+                    else:
+                        cloud_info = f"\n☁️ Upload to {self.data.storage} in progress..."
+                elif self.data.storage != 'local':
                     cloud_info = f"\n☁️ Cloud sync: Will be synced to {self.data.storage} automatically"
                 
                 # Final success message with backend info
@@ -220,36 +306,30 @@ class DownloadTask:
                 self.pbar = None
 
     def my_hook(self, d):
-        if not self.pbar:
-            return
-            
-        try:
-            if d['status'] == 'finished':
-                logger.info("Download finished, updating progress to 100%")
-                # Show 100% completion
-                total_bytes = d.get('total_bytes') or d.get('total_bytes_estimate')
-                downloaded_bytes = d.get('downloaded_bytes', total_bytes)
-                self.pbar.update(100, downloaded_bytes, total_bytes)
-                
-            elif d['status'] == 'downloading':
-                # Extract progress information from yt-dlp
-                downloaded_bytes = d.get('downloaded_bytes', 0)
-                total_bytes = d.get('total_bytes') or d.get('total_bytes_estimate')
-                
-                # Calculate percentage
-                if total_bytes and total_bytes > 0:
-                    percent = (downloaded_bytes / total_bytes) * 100
-                    self.pbar.update(percent, downloaded_bytes, total_bytes)
-                elif '_percent_str' in d and d['_percent_str']:
-                    # Fallback to yt-dlp's percentage if file size unknown
-                    try:
-                        percent = float(d['_percent_str'].replace('%', ''))
-                        self.pbar.update(percent)
-                    except (ValueError, TypeError) as e:
-                        logger.warning(f"Could not parse progress percentage: {e}")
+        """
+        Progress hook for yt-dlp downloads.
+        """
+        if d['status'] == 'downloading':
+            if self.pbar:
+                try:
+                    # Extract progress information
+                    downloaded_bytes = d.get('downloaded_bytes', 0)
+                    total_bytes = d.get('total_bytes') or d.get('total_bytes_estimate', 0)
+                    
+                    if total_bytes > 0:
+                        percent = (downloaded_bytes / total_bytes) * 100
+                        self.pbar.update(percent, downloaded_bytes, total_bytes)
+                    else:
+                        # Fallback for when total size is unknown
+                        self.pbar.update(0, downloaded_bytes, None)
                         
-        except Exception as e:
-            logger.error(f"Error in progress hook: {e}")
+                except Exception as e:
+                    logger.warning(f"Error updating download progress: {e}")
+        
+        elif d['status'] == 'finished':
+            logger.info(f"Download finished: {d['filename']}")
+            if self.pbar:
+                self.pbar.update(100)
 
 class CustomProgressTracker:
     def __init__(self, bot, chat_id, message_id):

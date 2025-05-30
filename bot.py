@@ -5,6 +5,7 @@
 This bot uses an inline keyboard to interact with the user.
 
 Press Ctrl-C on the command line to stop the bot.
+Optimized Dockerfile for better layer caching.
 """
 from dotenv import load_dotenv
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
@@ -15,6 +16,8 @@ import yt_dlp
 from hurry.filesize import size
 from task import TaskData, DownloadTask
 from backends.storage_manager import StorageManager
+from backends.storage_monitor import get_storage_monitor
+import subprocess
 
 # Enable logging
 logging.basicConfig(
@@ -132,6 +135,110 @@ def ls_command(update, context):
     execute_ls_command(update, backend, backend_name)
 
 
+def storage_command(update, context):
+    """Show storage status for all configured backends"""
+    user = update.message.from_user
+    if not is_trusted(user.id):
+        logger.info("Ignoring storage request from untrusted user '%s' with id '%s'", user.first_name, user.id)
+        return
+    
+    try:
+        # Get storage monitor instance
+        storage_monitor = get_storage_monitor(BOT_TOKEN)
+        
+        # Send initial message
+        status_msg = update.message.reply_text("🔍 Checking storage status...")
+        
+        # Get all available backends
+        available_backends = storage_manager.get_available_backends()
+        
+        if not available_backends:
+            status_msg.edit_text("❌ No storage backends configured!")
+            return
+        
+        # Check storage for each backend
+        storage_statuses = []
+        
+        for backend in available_backends:
+            backend_name = storage_manager.get_backend_display_name(backend)
+            
+            if backend == 'local':
+                # For local storage, show directory size
+                try:
+                    storage_path = storage_manager.ensure_storage_path(backend)
+                    
+                    # Calculate directory size
+                    total_size = 0
+                    file_count = 0
+                    for dirpath, dirnames, filenames in os.walk(storage_path):
+                        for filename in filenames:
+                            filepath = os.path.join(dirpath, filename)
+                            try:
+                                total_size += os.path.getsize(filepath)
+                                file_count += 1
+                            except (OSError, IOError):
+                                pass
+                    
+                    # Format size
+                    size_str = storage_monitor.format_storage_size(total_size)
+                    
+                    # Get filesystem status for local backend
+                    filesystem_status = storage_monitor.get_storage_status(backend, storage_path)
+                    if filesystem_status:
+                        storage_statuses.append(
+                            f"{filesystem_status}\n"
+                            f"• Files in directory: {file_count}\n"
+                            f"• Directory size: {size_str}\n"
+                            f"• Path: {storage_path}"
+                        )
+                    else:
+                        storage_statuses.append(
+                            f"💾 **{backend_name}**\n"
+                            f"• Files: {file_count}\n"
+                            f"• Directory size: {size_str}\n"
+                            f"• Path: {storage_path}\n"
+                            f"• Filesystem: ❌ Unable to check"
+                        )
+                    
+                except Exception as e:
+                    storage_statuses.append(
+                        f"💾 **{backend_name}**\n"
+                        f"• Status: ❌ Error checking local storage\n"
+                        f"• Error: {str(e)[:50]}..."
+                    )
+            else:
+                # For cloud backends, use rclone to check storage
+                status = storage_monitor.get_storage_status(backend)
+                if status:
+                    storage_statuses.append(status)
+                else:
+                    storage_statuses.append(
+                        f"☁️ **{backend_name}**\n"
+                        f"• Status: ❌ Unable to check storage\n"
+                        f"• Check connection and configuration"
+                    )
+        
+        # Combine all statuses
+        if storage_statuses:
+            final_message = "📊 **Storage Status Report**\n\n" + "\n\n".join(storage_statuses)
+            
+            # Add threshold information
+            warning_gb = int(os.getenv('STORAGE_WARNING_THRESHOLD_GB', '1'))
+            
+            final_message += f"\n\n⚙️ **Warning Thresholds:**\n"
+            final_message += f"• Warning: {warning_gb} GB"
+            
+        else:
+            final_message = "❌ No storage information available"
+        
+        # Update the message with final status
+        status_msg.edit_text(final_message, parse_mode='Markdown')
+        
+    except Exception as e:
+        logger.error(f"Error in storage command: {e}")
+        update.message.reply_text(f"❌ Error checking storage status:\n{str(e)[:100]}...")
+
+
 def help_command(update, context):
     """Show help information about all available commands"""
     user = update.message.from_user
@@ -151,6 +258,7 @@ def help_command(update, context):
 👤 `/whoami` - Show your Telegram user ID
 📁 `/ls` - List all downloaded media files
 🔎 `/search <query>` - Search for files by title (case-insensitive)
+📊 `/storage` - Check storage status for all backends
 
 **🎵 Download Features:**
 
@@ -179,7 +287,10 @@ YouTube, and any platform supported by yt-dlp
 3️⃣ **Search for files:**
    Send: `/search music` or `/search freak`
    
-4️⃣ **Check your user ID:**
+4️⃣ **Check storage status:**
+   Send: `/storage`
+   
+5️⃣ **Check your user ID:**
    Send: `/whoami`
 
 **🔒 Security:**
@@ -190,17 +301,24 @@ Only trusted users can use this bot.
 • Your original URL message is automatically deleted after download
 • Use `/ls` to see all your downloaded files with sizes
 • Use `/search` to find specific files quickly
+• Use `/storage` to monitor cloud storage space
 • Both audio and video formats are supported
 
 **🛠️ Technical Info:**
 • Powered by yt-dlp for reliable downloads
-• Local storage with configurable directory
+• Multi-backend storage support (local, Google Drive, Nextcloud, etc.)
 • Automatic format conversion (MP4→MP3 for audio)
 • Progress tracking with session IDs
+• Storage monitoring with low-space warnings
 
-Need help? Contact your bot administrator! 🚀"""
+**⚠️ Storage Warnings:**
+• You'll receive notifications when storage space is low
+• Applies to both cloud storage and local filesystem
+• Warning threshold: {os.getenv('STORAGE_WARNING_THRESHOLD_GB', '1')} GB
 
-    update.message.reply_text(help_text, parse_mode='Markdown', disable_web_page_preview=True)
+Need help? Send `/help` anytime!"""
+
+    update.message.reply_text(help_text, parse_mode='Markdown')
 
 
 def sanitize_search_query(query):
@@ -223,11 +341,80 @@ def sanitize_search_query(query):
     return safe_query.strip()
 
 
-def get_media_files_from_path(storage_path):
+def get_media_files_from_gdrive():
     """
-    Get all media files from a specific storage path.
+    Get all media files from Google Drive using rclone.
     Returns list of file info dictionaries.
     """
+    try:
+        # Use rclone directly instead of docker run
+        # The rclone config should be mounted at /home/bot/rclone-config/rclone.conf
+        cmd = [
+            'rclone', 'ls', 'gdrive:youtube-downloads',
+            '--config', '/home/bot/rclone-config/rclone.conf'
+        ]
+        
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        
+        if result.returncode != 0:
+            logger.warning(f"Failed to list Google Drive files: {result.stderr}")
+            return []
+        
+        # Parse rclone ls output
+        # Format: "    12345 filename.mp3"
+        media_extensions = {'.mp3', '.mp4', '.wav', '.flac', '.avi', '.mkv', '.webm', '.m4a', '.ogg'}
+        media_files = []
+        
+        for line in result.stdout.strip().split('\n'):
+            if not line.strip():
+                continue
+                
+            # Split by whitespace, first part is size, rest is filename
+            parts = line.strip().split(None, 1)
+            if len(parts) != 2:
+                continue
+                
+            size_bytes, filename = parts
+            
+            # Check if it's a media file
+            if any(filename.lower().endswith(ext) for ext in media_extensions):
+                try:
+                    # Convert size to human readable format
+                    size_int = int(size_bytes)
+                    size_str = size(size_int)
+                except:
+                    size_str = "Unknown"
+                
+                media_files.append({
+                    'name': filename,
+                    'size': size_str,
+                    'path': f"gdrive:youtube-downloads/{filename}"
+                })
+        
+        # Sort alphabetically by filename
+        media_files.sort(key=lambda x: x['name'].lower())
+        
+        logger.info(f"Found {len(media_files)} media files in Google Drive")
+        return media_files
+        
+    except subprocess.TimeoutExpired:
+        logger.error("Timeout listing Google Drive files")
+        return []
+    except Exception as e:
+        logger.error(f"Error getting media files from Google Drive: {e}")
+        return []
+
+
+def get_media_files_from_path(storage_path, backend=None):
+    """
+    Get all media files from a specific storage path or cloud backend.
+    Returns list of file info dictionaries.
+    """
+    # For Google Drive backend, use rclone to list files
+    if backend == 'gdrive':
+        return get_media_files_from_gdrive()
+    
+    # For local storage, use filesystem
     try:
         if not os.path.exists(storage_path):
             logger.info(f"Storage path does not exist: {storage_path}")
@@ -283,7 +470,7 @@ def get_media_files_list():
         return None, None
 
 
-def format_file_list(media_files, title="📁 **Media Files**", max_length=4000):
+def format_file_list(media_files, title="📁 **Media Files**", backend=None, max_length=4000):
     """
     Format media files list for display with automatic chunking.
     Returns list of message chunks.
@@ -292,7 +479,12 @@ def format_file_list(media_files, title="📁 **Media Files**", max_length=4000)
         return []
     
     file_list = f"{title} ({len(media_files)} files)\n"
-    file_list += f"📂 Location: `{os.getenv('LOCAL_STORAGE_DIR', './data')}`\n\n"
+    
+    # Show appropriate location based on backend
+    if backend == 'gdrive':
+        file_list += f"☁️ Google Drive: `gdrive:youtube-downloads`\n\n"
+    else:
+        file_list += f"📂 Location: `{os.getenv('LOCAL_STORAGE_DIR', './data')}`\n\n"
     
     for i, file_info in enumerate(media_files, 1):
         # Determine emoji based on file extension
@@ -756,14 +948,17 @@ def execute_ls_command(update_or_query, backend, backend_name):
     """
     try:
         storage_path = storage_manager.get_storage_path(backend)
-        media_files = get_media_files_from_path(storage_path)
+        media_files = get_media_files_from_path(storage_path, backend)
         
         if not media_files:
-            message = f"📁 No media files found in: {backend_name}\n📂 Path: `{storage_path}`"
+            if backend == 'gdrive':
+                message = f"📁 No media files found in: {backend_name}\n☁️ Google Drive: `gdrive:youtube-downloads`"
+            else:
+                message = f"📁 No media files found in: {backend_name}\n📂 Path: `{storage_path}`"
         else:
             # Format and send the file list
             title = f"📁 **{backend_name} Files** ({len(media_files)} files)"
-            chunks = format_file_list(media_files, title)
+            chunks = format_file_list(media_files, title, backend)
             message = chunks[0] if chunks else "📁 No files found"
         
         # Check if this is from a callback query (button) or direct command
@@ -801,7 +996,7 @@ def execute_search_command(update_or_query, backend, backend_name, search_args):
         else:
             search_query = sanitize_search_query(search_query)
             storage_path = storage_manager.get_storage_path(backend)
-            all_media_files = get_media_files_from_path(storage_path)
+            all_media_files = get_media_files_from_path(storage_path, backend)
             
             # Filter files by search query (case-insensitive)
             search_query_lower = search_query.lower()
@@ -811,14 +1006,19 @@ def execute_search_command(update_or_query, backend, backend_name, search_args):
             ]
             
             if not matching_files:
+                if backend == 'gdrive':
+                    location_info = "☁️ Google Drive: `gdrive:youtube-downloads`"
+                else:
+                    location_info = f"📂 Searched in: `{storage_path}`"
+                
                 message = (f"🔎 **No files found**\n\n"
                           f"No files matching `{search_query}` found in {backend_name}.\n\n"
-                          f"📂 Searched in: `{storage_path}`\n"
+                          f"{location_info}\n"
                           f"📊 Total files in backend: {len(all_media_files)}")
             else:
                 # Format the search results
                 title = f"🔎 **Search Results in {backend_name}**\n🔍 Query: `{search_query}`"
-                chunks = format_file_list(matching_files, title)
+                chunks = format_file_list(matching_files, title, backend)
                 message = chunks[0] if chunks else "🔎 No results found"
         
         # Check if this is from a callback query (button) or direct command
@@ -877,6 +1077,7 @@ def main():
     dp.add_handler(CommandHandler('whoami', whoami))
     dp.add_handler(CommandHandler('help', help_command))
     dp.add_handler(CommandHandler('search', search_command))
+    dp.add_handler(CommandHandler('storage', storage_command))
     dp.add_handler(CallbackQueryHandler(handle_command_backend_selection, pattern='^cmd_'))
     dp.add_handler(conv_handler)
 

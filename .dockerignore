@@ -1,0 +1,45 @@
+# Git files
+.git
+.gitignore
+
+# Documentation
+README.md
+docs/
+*.md
+
+# Environment files
+*.env
+bot.env
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Data directories
+data/
+rclone-logs/
+
+# IDE files
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Docker files
+Dockerfile.rclone
+
+# Scripts that aren't needed in container
+setup-rclone.sh
+test-rclone.sh
+
+# Backup files
+*.backup
+*.bak
+
+# Temporary files
+*.tmp
+*.temp 

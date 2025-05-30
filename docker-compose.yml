@@ -9,22 +9,26 @@ services:
         volumes:
             - ./data:/home/bot/data
             - ./rclone-config:/home/bot/rclone-config:ro
+            - ./rclone-logs:/logs:ro
         restart: unless-stopped
 
-    # Google Drive sync service
+    # Google Drive upload-only sync service
     rclone-gdrive:
-        image: rclone/rclone:latest
+        build:
+            context: .
+            dockerfile: Dockerfile.rclone
         container_name: rclone-gdrive
         profiles: ["gdrive"]
-        env_file:
-            - './rclone-gdrive.env'
+        environment:
+            - RCLONE_REMOTE_NAME=gdrive
+            - RCLONE_REMOTE_PATH=youtube-downloads
+            - RCLONE_LOCAL_PATH=/data/gdrive
+            - RCLONE_LOG_FILE=/logs/rclone-upload.log
+            - RCLONE_CHECK_INTERVAL=1
         volumes:
-            - ./data/gdrive:/data/gdrive:ro
+            - ./data/gdrive:/data/gdrive
             - ./rclone-config:/config:ro
             - ./rclone-logs:/logs
-            - ./scripts/rclone-sync.sh:/usr/local/bin/rclone-sync.sh:ro
-        entrypoint: ["/bin/sh"]
-        command: ["/usr/local/bin/rclone-sync.sh"]
         restart: unless-stopped
         depends_on:
             - youtube-telegram-downloader
