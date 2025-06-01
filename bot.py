@@ -748,6 +748,12 @@ def handle_storage_selection(update, context):
     backend_name = storage_manager.get_backend_display_name(backend)
     logger.info(f"User selected storage backend: {backend} ({backend_name})")
     
+    # Delete the storage selection message immediately to clean up UI
+    try:
+        query.delete_message()
+    except Exception as e:
+        logger.warning(f"Could not delete storage selection message: {e}")
+    
     # Go directly to format selection without intermediate message
     return proceed_to_format_selection(update, context)
 
@@ -875,13 +881,19 @@ def handle_command_backend_selection(update, context):
     backend_name = storage_manager.get_backend_display_name(backend)
     logger.info(f"User selected backend {backend} for {command_name} command")
     
-    # Execute the command with selected backend
+    # Delete the backend selection message immediately to clean up UI
+    try:
+        query.delete_message()
+    except Exception as e:
+        logger.warning(f"Could not delete backend selection message: {e}")
+    
+    # Execute the command with selected backend - use update instead of query since message was deleted
     if command_name == "ls":
-        execute_ls_command(query, backend, backend_name)
+        execute_ls_command(update, backend, backend_name)
     elif command_name == "search":
         # Get search args from user_data
         search_args = context.user_data.get("search_args", [])
-        execute_search_command(query, backend, backend_name, search_args)
+        execute_search_command(update, backend, backend_name, search_args)
         # Clean up
         context.user_data.pop("search_args", None)
 
@@ -907,11 +919,22 @@ def execute_ls_command(update_or_query, backend, backend_name):
         
         # Check if this is from a callback query (button) or direct command
         if hasattr(update_or_query, 'callback_query') and update_or_query.callback_query:
-            # From button selection - use edit_message_text
-            update_or_query.callback_query.edit_message_text(message, parse_mode='Markdown')
+            # From button selection - try to edit, if that fails send new message
+            try:
+                update_or_query.callback_query.edit_message_text(message, parse_mode='Markdown')
+            except:
+                # Message was deleted, send new one
+                update_or_query.callback_query.message.reply_text(message, parse_mode='Markdown')
         elif hasattr(update_or_query, 'edit_message_text'):
-            # This is a CallbackQuery object directly
-            update_or_query.edit_message_text(message, parse_mode='Markdown')
+            # This is a CallbackQuery object directly - try to edit, if that fails send new message
+            try:
+                update_or_query.edit_message_text(message, parse_mode='Markdown')
+            except:
+                # Message was deleted, get chat_id and send new message
+                chat_id = update_or_query.message.chat_id if hasattr(update_or_query, 'message') else update_or_query.from_user.id
+                import telegram
+                bot = telegram.Bot(os.getenv('BOT_TOKEN'))
+                bot.send_message(chat_id, message, parse_mode='Markdown')
         else:
             # From direct command - use reply_text
             update_or_query.message.reply_text(message, parse_mode='Markdown')
@@ -922,9 +945,18 @@ def execute_ls_command(update_or_query, backend, backend_name):
         
         # Same logic for error messages
         if hasattr(update_or_query, 'callback_query') and update_or_query.callback_query:
-            update_or_query.callback_query.edit_message_text(error_msg)
+            try:
+                update_or_query.callback_query.edit_message_text(error_msg)
+            except:
+                update_or_query.callback_query.message.reply_text(error_msg)
         elif hasattr(update_or_query, 'edit_message_text'):
-            update_or_query.edit_message_text(error_msg)
+            try:
+                update_or_query.edit_message_text(error_msg)
+            except:
+                chat_id = update_or_query.message.chat_id if hasattr(update_or_query, 'message') else update_or_query.from_user.id
+                import telegram
+                bot = telegram.Bot(os.getenv('BOT_TOKEN'))
+                bot.send_message(chat_id, error_msg)
         else:
             update_or_query.message.reply_text(error_msg)
 
@@ -967,11 +999,22 @@ def execute_search_command(update_or_query, backend, backend_name, search_args):
         
         # Check if this is from a callback query (button) or direct command
         if hasattr(update_or_query, 'callback_query') and update_or_query.callback_query:
-            # From button selection - use edit_message_text
-            update_or_query.callback_query.edit_message_text(message, parse_mode='Markdown')
+            # From button selection - try to edit, if that fails send new message
+            try:
+                update_or_query.callback_query.edit_message_text(message, parse_mode='Markdown')
+            except:
+                # Message was deleted, send new one
+                update_or_query.callback_query.message.reply_text(message, parse_mode='Markdown')
         elif hasattr(update_or_query, 'edit_message_text'):
-            # This is a CallbackQuery object directly
-            update_or_query.edit_message_text(message, parse_mode='Markdown')
+            # This is a CallbackQuery object directly - try to edit, if that fails send new message
+            try:
+                update_or_query.edit_message_text(message, parse_mode='Markdown')
+            except:
+                # Message was deleted, get chat_id and send new message
+                chat_id = update_or_query.message.chat_id if hasattr(update_or_query, 'message') else update_or_query.from_user.id
+                import telegram
+                bot = telegram.Bot(os.getenv('BOT_TOKEN'))
+                bot.send_message(chat_id, message, parse_mode='Markdown')
         else:
             # From direct command - use reply_text
             update_or_query.message.reply_text(message, parse_mode='Markdown')
@@ -982,9 +1025,18 @@ def execute_search_command(update_or_query, backend, backend_name, search_args):
         
         # Same logic for error messages
         if hasattr(update_or_query, 'callback_query') and update_or_query.callback_query:
-            update_or_query.callback_query.edit_message_text(error_msg)
+            try:
+                update_or_query.callback_query.edit_message_text(error_msg)
+            except:
+                update_or_query.callback_query.message.reply_text(error_msg)
         elif hasattr(update_or_query, 'edit_message_text'):
-            update_or_query.edit_message_text(error_msg)
+            try:
+                update_or_query.edit_message_text(error_msg)
+            except:
+                chat_id = update_or_query.message.chat_id if hasattr(update_or_query, 'message') else update_or_query.from_user.id
+                import telegram
+                bot = telegram.Bot(os.getenv('BOT_TOKEN'))
+                bot.send_message(chat_id, error_msg)
         else:
             update_or_query.message.reply_text(error_msg)
 
