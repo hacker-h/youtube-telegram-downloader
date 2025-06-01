@@ -45,13 +45,14 @@ load_dotenv(dotenv_path='./bot.env')
 BOT_TOKEN = os.getenv('BOT_TOKEN', None)
 
 class TaskData:
-    def __init__(self, url, storage, selected_format, update, output_format='mp3', storage_manager=None) -> None:
+    def __init__(self, url, storage, selected_format, update, output_format='mp3', storage_manager=None, original_message_id=None) -> None:
         self.url = url
         self.storage = storage
         self.selected_format = selected_format
         self.update = update
         self.output_format = output_format
         self.storage_manager = storage_manager
+        self.original_message_id = original_message_id
         
 class DownloadTask:
     def __init__(self, taskData) -> None:
@@ -66,6 +67,9 @@ class DownloadTask:
             # From direct message (immediate download)
             self.chat_id = self.data.update.message.chat.id
             self.old_message_id = self.data.update.message.message_id
+            
+        # Use original message ID from TaskData if available
+        self.original_user_message_id = self.data.original_message_id
             
         self.bot = telegram.Bot(BOT_TOKEN)
         self.progress_message_id = None
@@ -220,7 +224,13 @@ class DownloadTask:
                         message_id=self.progress_message_id,
                         backend=self.data.storage,
                         filename=filename,
-                        timeout=300  # 5 minutes timeout
+                        timeout=300,  # 5 minutes timeout
+                        # Pass additional info for final message
+                        original_user_message_id=self.original_user_message_id,
+                        file_path=final_file_path,
+                        output_format=self.data.output_format,
+                        url=self.data.url,
+                        backend_name=backend_name
                     )
                     
                     # Wait a bit for upload to potentially complete
@@ -257,6 +267,14 @@ class DownloadTask:
                     self.progress_message_id,
                     disable_web_page_preview=True
                 )
+                
+                # Delete the original user message with the YouTube URL
+                if self.original_user_message_id and self.original_user_message_id != self.progress_message_id:
+                    try:
+                        self.bot.delete_message(self.chat_id, self.original_user_message_id)
+                        logger.info(f"Deleted original user message: {self.original_user_message_id}")
+                    except Exception as e:
+                        logger.warning(f"Could not delete original user message: {e}")
             except Exception as e:
                 logger.error(f"Error moving file to final storage: {e}")
                 self.bot.edit_message_text(

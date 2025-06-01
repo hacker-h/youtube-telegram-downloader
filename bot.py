@@ -246,77 +246,21 @@ def help_command(update, context):
         logger.info("Ignoring help request from untrusted user '%s' with id '%s'", user.first_name, user.id)
         return
     
-    # Get current configuration
-    default_format = os.getenv('DEFAULT_OUTPUT_FORMAT', '').upper()
-    storage_dir = os.getenv('LOCAL_STORAGE_DIR', './data')
-    
-    help_text = f"""🤖 **YouTube Telegram Downloader Bot**
+    help_text = """🤖 **YouTube Telegram Downloader Bot**
 
-**📋 Available Commands:**
+**📋 Commands:**
+• `/ls` - List downloaded files
+• `/search <query>` - Search files by name
+• `/storage` - Check storage status
+• `/whoami` - Show your user ID
 
-🔍 `/help` - Show this help message
-👤 `/whoami` - Show your Telegram user ID
-📁 `/ls` - List all downloaded media files
-🔎 `/search <query>` - Search for files by title (case-insensitive)
-📊 `/storage` - Check storage status for all backends
+**📥 How to use:**
+1. Send any YouTube URL to download
+2. Use `/ls` to see your files
+3. Use `/search music` to find specific files
 
-**🎵 Download Features:**
-
-📺 **Send any YouTube URL** to start downloading
-• Automatic download with format: **{default_format or 'Not set'}**
-• Real-time progress tracking with percentages
-• Supports both audio (MP3) and video (MP4) formats
-• Files saved to: `{storage_dir}`
-
-**🎯 Supported Platforms:**
-YouTube, and any platform supported by yt-dlp
-
-**⚙️ Current Configuration:**
-• Default output format: **{default_format or 'Manual selection'}**
-• Storage location: `{storage_dir}`
-• Auto-download: **{'✅ Enabled' if default_format else '❌ Manual selection required'}**
-
-**📖 Usage Examples:**
-
-1️⃣ **Download a video:**
-   Send: `https://www.youtube.com/watch?v=VIDEO_ID`
-   
-2️⃣ **List downloaded files:**
-   Send: `/ls`
-   
-3️⃣ **Search for files:**
-   Send: `/search music` or `/search freak`
-   
-4️⃣ **Check storage status:**
-   Send: `/storage`
-   
-5️⃣ **Check your user ID:**
-   Send: `/whoami`
-
-**🔒 Security:**
-Only trusted users can use this bot.
-
-**💡 Tips:**
-• Progress is shown in real-time during downloads
-• Your original URL message is automatically deleted after download
-• Use `/ls` to see all your downloaded files with sizes
-• Use `/search` to find specific files quickly
-• Use `/storage` to monitor cloud storage space
-• Both audio and video formats are supported
-
-**🛠️ Technical Info:**
-• Powered by yt-dlp for reliable downloads
-• Multi-backend storage support (local, Google Drive, Nextcloud, etc.)
-• Automatic format conversion (MP4→MP3 for audio)
-• Progress tracking with session IDs
-• Storage monitoring with low-space warnings
-
-**⚠️ Storage Warnings:**
-• You'll receive notifications when storage space is low
-• Applies to both cloud storage and local filesystem
-• Warning threshold: {os.getenv('STORAGE_WARNING_THRESHOLD_GB', '1')} GB
-
-Need help? Send `/help` anytime!"""
+**🎯 Supported platforms:**
+YouTube and other yt-dlp compatible sites"""
 
     update.message.reply_text(help_text, parse_mode='Markdown')
 
@@ -596,6 +540,8 @@ def start(update, context):
 
     # save url to user context
     context.user_data["url"] = url
+    # Save original message ID for later cleanup
+    context.user_data["original_message_id"] = update.message.message_id
     logger.info("User %s started the conversation with '%s'.",
                 user.first_name, url)
     
@@ -721,9 +667,10 @@ def download_media_with_default_format(update, context):
     url = context.user_data["url"]
     output_format = DEFAULT_OUTPUT_FORMAT
     backend = context.user_data.get("storage_backend", "local")
+    original_message_id = context.user_data.get("original_message_id")
     
     # Pass storage_manager to TaskData
-    data = TaskData(url, backend, selected_format, update, output_format, storage_manager)
+    data = TaskData(url, backend, selected_format, update, output_format, storage_manager, original_message_id)
     task = DownloadTask(data)
     task.downloadVideo()
 
@@ -740,9 +687,10 @@ def download_media(update, context):
     url = context.user_data["url"]
     output_format = query.data
     backend = context.user_data.get("storage_backend", "local")
+    original_message_id = context.user_data.get("original_message_id")
     
     # Pass storage_manager to TaskData
-    data = TaskData(url, backend, selected_format, update, output_format, storage_manager)
+    data = TaskData(url, backend, selected_format, update, output_format, storage_manager, original_message_id)
     task = DownloadTask(data)
     task.downloadVideo()
 
@@ -821,7 +769,8 @@ def proceed_to_format_selection(update, context):
         
         # Start download immediately with best format and default output
         backend = context.user_data.get("storage_backend", "local")
-        data = TaskData(url, backend, CALLBACK_BEST_FORMAT, update, DEFAULT_OUTPUT_FORMAT, storage_manager)
+        original_message_id = context.user_data.get("original_message_id")
+        data = TaskData(url, backend, CALLBACK_BEST_FORMAT, update, DEFAULT_OUTPUT_FORMAT, storage_manager, original_message_id)
         task = DownloadTask(data)
         task.downloadVideo()
         return ConversationHandler.END

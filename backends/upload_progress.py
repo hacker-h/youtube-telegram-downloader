@@ -13,12 +13,21 @@ class UploadProgressTracker:
     and provides real-time updates to Telegram messages.
     """
     
-    def __init__(self, bot, chat_id: int, message_id: int, backend: str, filename: str):
+    def __init__(self, bot, chat_id: int, message_id: int, backend: str, filename: str,
+                 original_user_message_id: int = None, file_path: str = None, 
+                 output_format: str = None, url: str = None, backend_name: str = None):
         self.bot = bot
         self.chat_id = chat_id
         self.message_id = message_id
         self.backend = backend
         self.filename = filename
+        
+        # Additional info for final message
+        self.original_user_message_id = original_user_message_id
+        self.file_path = file_path
+        self.output_format = output_format
+        self.url = url
+        self.backend_name = backend_name or backend
         
         # Progress tracking
         self.is_monitoring = False
@@ -131,14 +140,14 @@ class UploadProgressTracker:
             # Check for upload completion
             if "✅ Upload completed" in line and self.filename in line:
                 self.upload_completed = True
-                self._update_message("✅ Upload completed successfully!")
+                self._create_final_success_message()
                 logger.info(f"Upload completed for {self.filename}")
                 return True
                 
             # Check for upload failure
             if "❌ Upload failed" in line and self.filename in line:
                 self.upload_completed = True
-                self._update_message("❌ Upload failed")
+                self._create_final_failure_message()
                 logger.error(f"Upload failed for {self.filename}")
                 return True
                 
@@ -209,6 +218,83 @@ class UploadProgressTracker:
             )
         except Exception as e:
             logger.warning(f"Failed to update upload progress message: {e}")
+    
+    def _create_final_success_message(self) -> None:
+        """Create a comprehensive final success message and clean up original message."""
+        try:
+            # Create detailed success message
+            message = "✅ **Download completed!**\n\n"
+            message += f"📁 File: `{self.filename}`\n"
+            
+            if self.output_format:
+                message += f"🎵 Format: {self.output_format.upper()}\n"
+            
+            message += f"💾 Backend: {self.backend_name}\n"
+            
+            if self.file_path:
+                directory = os.path.dirname(self.file_path)
+                message += f"📂 Location: `{directory}/`\n"
+            
+            message += f"☁️ Upload: ✅ Uploaded to {self.backend} successfully\n"
+            
+            if self.url:
+                message += f"🔗 URL: {self.url[:50]}..."
+            
+            # Update the progress message with final status
+            self.bot.edit_message_text(
+                text=message,
+                chat_id=self.chat_id,
+                message_id=self.message_id,
+                parse_mode='Markdown',
+                disable_web_page_preview=True
+            )
+            
+            # Delete the original user message with the YouTube URL
+            if self.original_user_message_id and self.original_user_message_id != self.message_id:
+                try:
+                    self.bot.delete_message(self.chat_id, self.original_user_message_id)
+                    logger.info(f"Deleted original user message: {self.original_user_message_id}")
+                except Exception as e:
+                    logger.warning(f"Could not delete original user message: {e}")
+                    
+        except Exception as e:
+            logger.error(f"Failed to create final success message: {e}")
+            # Fallback to simple message
+            self._update_message("✅ Upload completed successfully!")
+    
+    def _create_final_failure_message(self) -> None:
+        """Create a final failure message and clean up original message."""
+        try:
+            message = "❌ **Upload failed!**\n\n"
+            message += f"📁 File: `{self.filename}`\n"
+            message += f"💾 Backend: {self.backend_name}\n"
+            message += f"☁️ Upload failed to {self.backend}\n\n"
+            message += "The file was downloaded successfully but could not be uploaded to cloud storage."
+            
+            if self.url:
+                message += f"\n🔗 URL: {self.url[:50]}..."
+            
+            # Update the progress message with failure status
+            self.bot.edit_message_text(
+                text=message,
+                chat_id=self.chat_id,
+                message_id=self.message_id,
+                parse_mode='Markdown',
+                disable_web_page_preview=True
+            )
+            
+            # Delete the original user message with the YouTube URL
+            if self.original_user_message_id and self.original_user_message_id != self.message_id:
+                try:
+                    self.bot.delete_message(self.chat_id, self.original_user_message_id)
+                    logger.info(f"Deleted original user message: {self.original_user_message_id}")
+                except Exception as e:
+                    logger.warning(f"Could not delete original user message: {e}")
+                    
+        except Exception as e:
+            logger.error(f"Failed to create final failure message: {e}")
+            # Fallback to simple message
+            self._update_message("❌ Upload failed")
 
 
 class UploadProgressManager:
@@ -221,7 +307,10 @@ class UploadProgressManager:
         self.active_trackers = {}
         
     def start_upload_monitoring(self, bot, chat_id: int, message_id: int, 
-                              backend: str, filename: str, timeout: int = 300) -> UploadProgressTracker:
+                              backend: str, filename: str, timeout: int = 300,
+                              original_user_message_id: int = None, file_path: str = None,
+                              output_format: str = None, url: str = None, 
+                              backend_name: str = None) -> UploadProgressTracker:
         """
         Start monitoring upload progress for a file.
         
@@ -232,6 +321,11 @@ class UploadProgressManager:
             backend: Storage backend name
             filename: Name of file being uploaded
             timeout: Maximum monitoring time in seconds
+            original_user_message_id: ID of original user message to delete
+            file_path: Full path to the uploaded file
+            output_format: Output format (mp3, mp4)
+            url: Original YouTube URL
+            backend_name: Display name of the backend
             
         Returns:
             UploadProgressTracker instance
@@ -242,7 +336,14 @@ class UploadProgressManager:
             self.active_trackers[tracker_key].stop_monitoring()
             
         # Create and start new tracker
-        tracker = UploadProgressTracker(bot, chat_id, message_id, backend, filename)
+        tracker = UploadProgressTracker(
+            bot, chat_id, message_id, backend, filename,
+            original_user_message_id=original_user_message_id,
+            file_path=file_path,
+            output_format=output_format,
+            url=url,
+            backend_name=backend_name
+        )
         self.active_trackers[tracker_key] = tracker
         tracker.start_monitoring(timeout)
         
