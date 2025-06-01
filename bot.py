@@ -748,12 +748,7 @@ def handle_storage_selection(update, context):
     backend_name = storage_manager.get_backend_display_name(backend)
     logger.info(f"User selected storage backend: {backend} ({backend_name})")
     
-    # Update message to show selection
-    query.edit_message_text(
-        f"✅ **Storage Selected:** {backend_name}\n\nProceeding to format selection...",
-        parse_mode='Markdown'
-    )
-    
+    # Go directly to format selection without intermediate message
     return proceed_to_format_selection(update, context)
 
 
