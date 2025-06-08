@@ -11,6 +11,7 @@ REMOTE_PATH="${RCLONE_REMOTE_PATH:-youtube-downloads}"
 LOCAL_PATH="${RCLONE_LOCAL_PATH:-/data/gdrive}"
 LOG_FILE="${RCLONE_LOG_FILE:-/logs/rclone-upload.log}"
 CHECK_INTERVAL="${RCLONE_CHECK_INTERVAL:-1}"  # Fallback check interval in seconds
+HEARTBEAT_FILE="${LOCAL_PATH}/.rclone-heartbeat"
 
 # Ensure directories exist
 mkdir -p "$(dirname "$LOG_FILE")"
@@ -19,6 +20,11 @@ mkdir -p "$LOCAL_PATH"
 # Logging function
 log() {
     echo "[$(date '+%a %b %d %H:%M:%S UTC %Y')] $1" | tee -a "$LOG_FILE"
+}
+
+# Update heartbeat file
+update_heartbeat() {
+    echo "$(date '+%s')" > "$HEARTBEAT_FILE"
 }
 
 # Upload a single file and delete it locally on success
@@ -76,8 +82,14 @@ monitor_with_inotify() {
     
     # Monitor for file creation and moves (when files are moved into the directory)
     inotifywait -m -e close_write,moved_to "$LOCAL_PATH" --format '%w%f %e' 2>/dev/null | while read file event; do
+        # Update heartbeat
+        update_heartbeat
+        
         # Skip if not a regular file
         [ -f "$file" ] || continue
+        
+        # Skip heartbeat file itself
+        [ "$(basename "$file")" = ".rclone-heartbeat" ] && continue
         
         log "🔔 File detected: $(basename "$file") (event: $event)"
         
@@ -94,12 +106,18 @@ monitor_with_polling() {
     log "⏰ Starting polling monitoring (every ${CHECK_INTERVAL}s) on $LOCAL_PATH"
     
     while true; do
+        # Update heartbeat
+        update_heartbeat
+        
         for file in "$LOCAL_PATH"/*; do
             # Skip if no files match the pattern
             [ -e "$file" ] || continue
             
             # Skip directories
             [ -f "$file" ] || continue
+            
+            # Skip heartbeat file itself
+            [ "$(basename "$file")" = ".rclone-heartbeat" ] && continue
             
             log "🔔 File detected: $(basename "$file")"
             upload_file "$file"
@@ -123,6 +141,10 @@ main() {
     fi
     
     log "✅ Remote connection verified"
+    
+    # Create initial heartbeat
+    update_heartbeat
+    log "💓 Heartbeat created: $HEARTBEAT_FILE"
     
     # Process any existing files first
     process_existing_files

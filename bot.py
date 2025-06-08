@@ -475,23 +475,43 @@ def start(update, context):
     except:
         pass
     
-    # Check if we should ask for storage backend
-    if storage_manager.should_ask_for_backend():
-        # Multiple backends available, ask user to choose
-        return select_storage_backend(update, context)
+    # Check if we should ask for storage backend (with retry for heartbeat detection)
+    import time
+    max_retries = 3
+    retry_delay = 2
+    
+    for attempt in range(max_retries):
+        if storage_manager.should_ask_for_backend():
+            # Multiple backends available, ask user to choose
+            return select_storage_backend(update, context)
+        
+        # Check if we found any backends or if this is the last attempt
+        available_backends = storage_manager.get_available_backends()
+        if len(available_backends) > 1 or attempt == max_retries - 1:
+            break
+            
+        # Wait a bit for rclone containers to start their heartbeats
+        logger.info(f"Waiting for rclone backends to start (attempt {attempt + 1}/{max_retries})...")
+        time.sleep(retry_delay)
+    
+    # Use default backend or only available backend
+    default_backend = storage_manager.get_default_backend()
+    if default_backend:
+        context.user_data["storage_backend"] = default_backend
+        logger.info(f"Using default storage backend: {default_backend}")
     else:
-        # Use default backend or only available backend
-        default_backend = storage_manager.get_default_backend()
-        if default_backend:
-            context.user_data["storage_backend"] = default_backend
-            logger.info(f"Using default storage backend: {default_backend}")
+        # Check available backends one more time
+        available_backends = storage_manager.get_available_backends()
+        if len(available_backends) > 1:
+            # Multiple backends found after retry, ask user
+            return select_storage_backend(update, context)
         else:
             # Only local storage available
             context.user_data["storage_backend"] = "local"
             logger.info("Using local storage (only backend available)")
-        
-        # Proceed to format selection or direct download
-        return proceed_to_format_selection(update, context)
+    
+    # Proceed to format selection or direct download
+    return proceed_to_format_selection(update, context)
 
 
 def build_menu(buttons, n_cols, header_buttons=None, footer_buttons=None):
