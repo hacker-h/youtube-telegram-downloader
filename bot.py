@@ -5,15 +5,19 @@
 This bot uses an inline keyboard to interact with the user.
 
 Press Ctrl-C on the command line to stop the bot.
+Optimized Dockerfile for better layer caching.
 """
 from dotenv import load_dotenv
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import CallbackQueryHandler, ConversationHandler, CommandHandler, Filters, MessageHandler, Updater
 import logging
 import os
-import youtube_dl
+import yt_dlp
 from hurry.filesize import size
-from backends import google_drive
+from task import TaskData, DownloadTask
+from backends.storage_manager import StorageManager
+from backends.storage_monitor import get_storage_monitor
+import subprocess
 
 # Enable logging
 logging.basicConfig(
@@ -41,29 +45,55 @@ if TRUSTED_USER_IDS is [] or TRUSTED_USER_IDS == [""]:
     TRUSTED_USER_IDS = TRUST_ANYBODY
     logger.info("TRUSTED_USER_IDS was not set, bot will trust anybody.")
 
-# Stages
-OUTPUT, STORAGE, DOWNLOAD = range(3)
+# Check for default output format
+DEFAULT_OUTPUT_FORMAT = os.getenv('DEFAULT_OUTPUT_FORMAT', '').lower()
+if DEFAULT_OUTPUT_FORMAT:
+    logger.info(f"DEFAULT_OUTPUT_FORMAT is set to: {DEFAULT_OUTPUT_FORMAT}")
+    if DEFAULT_OUTPUT_FORMAT not in ['mp3', 'mp4']:
+        logger.warning(f"Invalid DEFAULT_OUTPUT_FORMAT '{DEFAULT_OUTPUT_FORMAT}', must be 'mp3' or 'mp4'. Ignoring.")
+        DEFAULT_OUTPUT_FORMAT = ''
+
+# Stages - added STORAGE stage for backend selection
+STORAGE, OUTPUT, DOWNLOAD = range(3)
 
 # Callback data
 CALLBACK_MP4 = "mp4"
 CALLBACK_MP3 = "mp3"
-CALLBACK_OVERCAST = "overcast"
-CALLBACK_GOOGLE_DRIVE = "drive"
+CALLBACK_LOCAL = "local"
 CALLBACK_BEST_FORMAT = "best"
 CALLBACK_SELECT_FORMAT = "select_format"
 CALLBACK_ABORT = "abort"
 
+# Initialize storage manager
+storage_manager = StorageManager()
 
-def is_supported(url):
+
+def quick_url_check(url):
     """
-    Checks whether the URL type is eligible for youtube_dl.\n
-    Returns True or False.
+    Fast static URL validation without API calls.
+    Returns: (is_likely_valid, error_message)
     """
-    extractors = youtube_dl.extractor.gen_extractors()
-    for e in extractors:
-        if e.suitable(url) and e.IE_NAME != 'generic':
-            return True
-    return False
+    # Check for obvious incomplete URLs
+    if 'youtube.com/watch?v=' in url:
+        video_id = url.split('v=')[1].split('&')[0]
+        if not video_id or video_id in ['VIDEO_ID', 'VIDEOID', 'your_video_id', 'example']:
+            return False, f"❌ Placeholder video ID detected: `{video_id}`\n\nPlease replace with a real YouTube video ID!"
+    
+    # Check for incomplete YouTube URLs without video ID
+    if url.endswith('youtube.com/watch?v') or url.endswith('youtube.com/watch?v='):
+        return False, "❌ Incomplete YouTube URL!\n\nPlease send a complete URL like:\n`https://www.youtube.com/watch?v=dQw4w9WgXcQ`"
+    
+    # Check for supported platforms
+    supported_domains = ['youtube.com', 'youtu.be', 'twitch.tv', 'vimeo.com', 'soundcloud.com', 'bandcamp.com']
+    if not any(domain in url.lower() for domain in supported_domains):
+        return False, "❌ Unsupported platform!\n\nI support YouTube, Twitch, Vimeo and other platforms supported by yt-dlp.\nSend `/help` for more info."
+    
+    # Basic URL format check
+    if not url.startswith(('http://', 'https://')):
+        return False, "❌ Invalid URL format!\n\nPlease send a complete URL starting with http:// or https://"
+    
+    return True, None
+
 
 
 def is_trusted(user_id):
@@ -86,6 +116,310 @@ def whoami(update, context):
         update.message.reply_text(user.id)
 
 
+def ls_command(update, context):
+    """List all media files in the storage directory"""
+    user = update.message.from_user
+    if not is_trusted(user.id):
+        logger.info("Ignoring ls request from untrusted user '%s' with id '%s'", user.first_name, user.id)
+        return
+    
+    # Check if we should ask for backend selection
+    backend = get_backend_for_command(update, context, "ls")
+    if backend is None:
+        # Multiple backends available, ask user to choose
+        show_backend_selection_for_command(update, context, "ls")
+        return
+    
+    # Execute ls command with determined backend
+    backend_name = storage_manager.get_backend_display_name(backend)
+    execute_ls_command(update, backend, backend_name)
+
+
+def storage_command(update, context):
+    """Show storage status for selected backend"""
+    user = update.message.from_user
+    if not is_trusted(user.id):
+        logger.info("Ignoring storage request from untrusted user '%s' with id '%s'", user.first_name, user.id)
+        return
+    
+    # Check if we should ask for backend selection
+    backend = get_backend_for_command(update, context, "storage")
+    if backend is None:
+        # Multiple backends available, ask user to choose
+        show_backend_selection_for_command(update, context, "storage")
+        return
+    
+    # Execute storage command with determined backend
+    backend_name = storage_manager.get_backend_display_name(backend)
+    execute_storage_command(update, backend, backend_name)
+
+
+def help_command(update, context):
+    """Show help information about all available commands"""
+    user = update.message.from_user
+    if not is_trusted(user.id):
+        logger.info("Ignoring help request from untrusted user '%s' with id '%s'", user.first_name, user.id)
+        return
+    
+    help_text = """🤖 **YouTube Telegram Downloader Bot**
+
+**📋 Commands:**
+• `/ls` - List downloaded files
+• `/search <query>` - Search files by name
+• `/storage` - Check storage status
+• `/whoami` - Show your user ID
+
+**📥 How to use:**
+1. Send any YouTube URL to download
+2. Use `/ls` to see your files
+3. Use `/search music` to find specific files
+
+**🎯 Supported platforms:**
+YouTube and other yt-dlp compatible sites"""
+
+    update.message.reply_text(help_text, parse_mode='Markdown')
+
+
+def sanitize_search_query(query):
+    """
+    Sanitize search query to prevent any potential security issues.
+    Remove potentially dangerous characters and limit length.
+    """
+    import re
+    
+    # Remove control characters, null bytes, and other dangerous chars
+    # Keep only alphanumeric, spaces, dots, hyphens, underscores
+    safe_query = re.sub(r'[^\w\s\.\-]', '', query)
+    
+    # Limit length to prevent abuse
+    safe_query = safe_query[:100]
+    
+    # Remove excessive whitespace
+    safe_query = ' '.join(safe_query.split())
+    
+    return safe_query.strip()
+
+
+def get_media_files_from_gdrive():
+    """
+    Get all media files from Google Drive using rclone.
+    Returns list of file info dictionaries.
+    """
+    try:
+        # Use rclone directly instead of docker run
+        # The rclone config should be mounted at /home/bot/rclone-config/rclone.conf
+        cmd = [
+            'rclone', 'ls', 'gdrive:youtube-downloads',
+            '--config', '/home/bot/rclone-config/rclone.conf'
+        ]
+        
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        
+        if result.returncode != 0:
+            logger.warning(f"Failed to list Google Drive files: {result.stderr}")
+            return []
+        
+        # Parse rclone ls output
+        # Format: "    12345 filename.mp3"
+        media_extensions = {'.mp3', '.mp4', '.wav', '.flac', '.avi', '.mkv', '.webm', '.m4a', '.ogg'}
+        media_files = []
+        
+        for line in result.stdout.strip().split('\n'):
+            if not line.strip():
+                continue
+                
+            # Split by whitespace, first part is size, rest is filename
+            parts = line.strip().split(None, 1)
+            if len(parts) != 2:
+                continue
+                
+            size_bytes, filename = parts
+            
+            # Check if it's a media file
+            if any(filename.lower().endswith(ext) for ext in media_extensions):
+                try:
+                    # Convert size to human readable format
+                    size_int = int(size_bytes)
+                    size_str = size(size_int)
+                except:
+                    size_str = "Unknown"
+                
+                media_files.append({
+                    'name': filename,
+                    'size': size_str,
+                    'path': f"gdrive:youtube-downloads/{filename}"
+                })
+        
+        # Sort alphabetically by filename
+        media_files.sort(key=lambda x: x['name'].lower())
+        
+        logger.info(f"Found {len(media_files)} media files in Google Drive")
+        return media_files
+        
+    except subprocess.TimeoutExpired:
+        logger.error("Timeout listing Google Drive files")
+        return []
+    except Exception as e:
+        logger.error(f"Error getting media files from Google Drive: {e}")
+        return []
+
+
+def get_media_files_from_path(storage_path, backend=None):
+    """
+    Get all media files from a specific storage path or cloud backend.
+    Returns list of file info dictionaries.
+    """
+    # For Google Drive backend, use rclone to list files
+    if backend == 'gdrive':
+        return get_media_files_from_gdrive()
+    
+    # For local storage, use filesystem
+    try:
+        if not os.path.exists(storage_path):
+            logger.info(f"Storage path does not exist: {storage_path}")
+            return []
+        
+        # Get all media files
+        media_extensions = {'.mp3', '.mp4', '.wav', '.flac', '.avi', '.mkv', '.webm', '.m4a', '.ogg'}
+        media_files = []
+        
+        for filename in os.listdir(storage_path):
+            file_path = os.path.join(storage_path, filename)
+            if os.path.isfile(file_path) and any(filename.lower().endswith(ext) for ext in media_extensions):
+                # Get file size
+                try:
+                    file_size = os.path.getsize(file_path)
+                    size_str = size(file_size)
+                except:
+                    size_str = "Unknown"
+                
+                media_files.append({
+                    'name': filename,
+                    'size': size_str,
+                    'path': file_path
+                })
+        
+        # Sort alphabetically by filename
+        media_files.sort(key=lambda x: x['name'].lower())
+        
+        return media_files
+    except Exception as e:
+        logger.error(f"Error getting media files from {storage_path}: {e}")
+        return []
+
+
+def get_media_files_list():
+    """
+    Legacy function for backward compatibility.
+    Now uses the default backend or local storage.
+    """
+    try:
+        # Use default backend if available, otherwise local
+        default_backend = storage_manager.get_default_backend()
+        if default_backend:
+            storage_path = storage_manager.get_storage_path(default_backend)
+        else:
+            # Fallback to local backend
+            storage_path = storage_manager.get_storage_path("local")
+        
+        media_files = get_media_files_from_path(storage_path)
+        return media_files, storage_path
+    except Exception as e:
+        logger.error(f"Error in get_media_files_list: {e}")
+        return None, None
+
+
+def format_file_list(media_files, title="📁 **Media Files**", backend=None, max_length=4000):
+    """
+    Format media files list for display with automatic chunking.
+    Returns list of message chunks.
+    """
+    if not media_files:
+        return []
+    
+    file_list = f"{title} ({len(media_files)} files)\n"
+    
+    # Show appropriate location based on backend
+    if backend == 'gdrive':
+        file_list += f"☁️ Google Drive: `gdrive:youtube-downloads`\n\n"
+    else:
+        file_list += f"📂 Location: `{os.getenv('LOCAL_STORAGE_DIR', './data')}`\n\n"
+    
+    for i, file_info in enumerate(media_files, 1):
+        # Determine emoji based on file extension
+        name = file_info['name']
+        if name.lower().endswith(('.mp3', '.wav', '.flac', '.m4a', '.ogg')):
+            emoji = "🎵"
+        else:
+            emoji = "🎬"
+        
+        file_list += f"{i:2d}. {emoji} `{name}`\n"
+        file_list += f"     📊 Size: {file_info['size']}\n\n"
+    
+    # Split message if too long for Telegram
+    if len(file_list) <= max_length:
+        return [file_list]
+    
+    # Split into chunks
+    chunks = []
+    lines = file_list.split('\n')
+    current_chunk = lines[0] + '\n' + lines[1] + '\n\n'  # Header
+    
+    for line in lines[2:]:
+        if len(current_chunk + line + '\n') > max_length:
+            if current_chunk.strip():
+                chunks.append(current_chunk)
+            current_chunk = line + '\n'
+        else:
+            current_chunk += line + '\n'
+    
+    if current_chunk.strip():
+        chunks.append(current_chunk)
+    
+    return chunks
+
+
+def search_command(update, context):
+    """Search for media files by title (case-insensitive) - SECURITY HARDENED"""
+    user = update.message.from_user
+    if not is_trusted(user.id):
+        logger.info("Ignoring search request from untrusted user '%s' with id '%s'", user.first_name, user.id)
+        return
+    
+    # Get and sanitize search query from command arguments
+    raw_search_query = ' '.join(context.args).strip()
+    search_query = sanitize_search_query(raw_search_query)
+    
+    if not search_query:
+        update.message.reply_text(
+            "🔎 **Search Media Files**\n\n"
+            "Usage: `/search <query>`\n\n"
+            "**Examples:**\n"
+            "• `/search music`\n"
+            "• `/search infraction`\n"
+            "• `/search mp3` (search by file extension)\n\n"
+            "Search is case-insensitive and matches anywhere in the filename.\n"
+            "⚠️ Only alphanumeric characters, spaces, dots, hyphens and underscores are allowed.",
+            parse_mode='Markdown'
+        )
+        return
+    
+    # Warn if query was sanitized
+    if search_query != raw_search_query:
+        logger.warning(f"Search query sanitized: '{raw_search_query}' -> '{search_query}'")
+    
+    # Check if we should ask for backend selection
+    backend = get_backend_for_command(update, context, "search")
+    if backend is None:
+        # Multiple backends available, ask user to choose
+        show_backend_selection_for_command(update, context, "search", context.args)
+        return
+    
+    # Execute search command with determined backend
+    backend_name = storage_manager.get_backend_display_name(backend)
+    execute_search_command(update, backend, backend_name, context.args)
+
+
 def start(update, context):
     """
     Invoked on every user message to create an interactive inline conversation.
@@ -105,37 +439,79 @@ def start(update, context):
     if message_text == "whoami":
         whoami(update, context)
         return ConversationHandler.END
+    
+    # handle ls command as plain string
+    if message_text == "ls":
+        ls_command(update, context)
+        return ConversationHandler.END
+    
+    # handle help command as plain string
+    if message_text == "help":
+        help_command(update, context)
+        return ConversationHandler.END
 
     # update global URL object
     url = message_text
+
     # save url to user context
     context.user_data["url"] = url
+    # Save original message ID for later cleanup
+    context.user_data["original_message_id"] = update.message.message_id
     logger.info("User %s started the conversation with '%s'.",
                 user.first_name, url)
-    # Build InlineKeyboard where each button has a displayed text
-    # and a string as callback_data
-    # The keyboard is a list of button rows, where each row is in turn
-    # a list (hence `[[...]]`).
-    if is_supported(url):
-        keyboard = [
-            [
-                InlineKeyboardButton(
-                    "Download Best Format", callback_data=CALLBACK_BEST_FORMAT),
-                InlineKeyboardButton(
-                    "Select Format", callback_data=CALLBACK_SELECT_FORMAT),
-                # TODO add abort button
-                # InlineKeyboardButton("Abort", callback_data=CALLBACK_ABORT),
-            ]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        # Send message with text and appended InlineKeyboard
-        update.message.reply_text(
-            "Do you want me to download '%s' ?" % url, reply_markup=reply_markup)
-        return OUTPUT
+    
+    # Fast static URL validation first
+    is_valid_quick, error_msg = quick_url_check(url)
+    if not is_valid_quick:
+        update.message.reply_text(error_msg, parse_mode='Markdown')
+        return ConversationHandler.END
+    
+    # Send immediate feedback that bot is alive and processing
+    checking_msg = update.message.reply_text("🔍 Checking URL...")
+    
+    # Delete the "checking" message
+    try:
+        checking_msg.delete()
+    except:
+        pass
+    
+    # Check if we should ask for storage backend (with retry for heartbeat detection)
+    import time
+    max_retries = 3
+    retry_delay = 2
+    
+    for attempt in range(max_retries):
+        if storage_manager.should_ask_for_backend():
+            # Multiple backends available, ask user to choose
+            return select_storage_backend(update, context)
+        
+        # Check if we found any backends or if this is the last attempt
+        available_backends = storage_manager.get_available_backends()
+        if len(available_backends) > 1 or attempt == max_retries - 1:
+            break
+            
+        # Wait a bit for rclone containers to start their heartbeats
+        logger.info(f"Waiting for rclone backends to start (attempt {attempt + 1}/{max_retries})...")
+        time.sleep(retry_delay)
+    
+    # Use default backend or only available backend
+    default_backend = storage_manager.get_default_backend()
+    if default_backend:
+        context.user_data["storage_backend"] = default_backend
+        logger.info(f"Using default storage backend: {default_backend}")
     else:
-        logger.info("Invalid url requested: '%s'", url)
-        update.message.reply_text("I can't download your request '%s' 😤" % url)
-        ConversationHandler.END
+        # Check available backends one more time
+        available_backends = storage_manager.get_available_backends()
+        if len(available_backends) > 1:
+            # Multiple backends found after retry, ask user
+            return select_storage_backend(update, context)
+        else:
+            # Only local storage available
+            context.user_data["storage_backend"] = "local"
+            logger.info("Using local storage (only backend available)")
+    
+    # Proceed to format selection or direct download
+    return proceed_to_format_selection(update, context)
 
 
 def build_menu(buttons, n_cols, header_buttons=None, footer_buttons=None):
@@ -160,9 +536,8 @@ def select_source_format(update, context):
     # get formats
     url = context.user_data["url"]
     ydl_opts = {}
-    with youtube_dl.YoutubeDL(ydl_opts) as ydl:
-        meta = ydl.extract_info(
-            url, download_media=False)
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        meta = ydl.extract_info(url, download=False)
         formats = meta.get('formats', [meta])
 
     # dynamically build a format menu
@@ -191,152 +566,565 @@ def select_source_format(update, context):
 def select_output_format(update, context):
     """
     A stage asking the user for the desired output media format.
+    If DEFAULT_OUTPUT_FORMAT is set, skip this and go directly to download.
     """
     logger.info("output()")
     query = update.callback_query
     context.user_data[CALLBACK_SELECT_FORMAT] = query.data
     query.answer()
+    
+    # Check if default output format is configured
+    if DEFAULT_OUTPUT_FORMAT:
+        logger.info(f"Using default output format: {DEFAULT_OUTPUT_FORMAT}")
+        # Go directly to download with the default format
+        return download_media_with_default_format(update, context)
+    
+    # Show format selection if no default is set
     keyboard = [
         [
-            InlineKeyboardButton("Audio", callback_data=CALLBACK_MP3),
-            InlineKeyboardButton("Video", callback_data=CALLBACK_MP4),
+            InlineKeyboardButton("MP4", callback_data=CALLBACK_MP4),
+            InlineKeyboardButton("MP3", callback_data=CALLBACK_MP3),
         ]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     query.edit_message_text(
-        text="Do you want the full video or just audio?", reply_markup=reply_markup
-    )
-    return STORAGE
-
-
-def select_storage(update, context):
-    """
-    A stage asking the user for the storage backend to which the media file shall be uploaded.
-    """
-    logger.info("storage()")
-    query = update.callback_query
-    context.user_data["output"] = query.data
-    query.answer()
-    keyboard = [
-        [
-            InlineKeyboardButton(
-                "Google Drive", callback_data=CALLBACK_GOOGLE_DRIVE),
-            InlineKeyboardButton("Overcast", callback_data=CALLBACK_OVERCAST),
-        ]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    query.edit_message_text(
-        text="Where shall I upload the file?", reply_markup=reply_markup
+        text="Choose Output Format", reply_markup=reply_markup
     )
     return DOWNLOAD
 
 
+def download_media_with_default_format(update, context):
+    """
+    Download media using the default output format (when DEFAULT_OUTPUT_FORMAT is set).
+    """
+    logger.info("download() with default format")
+    selected_format = context.user_data[CALLBACK_SELECT_FORMAT]
+    url = context.user_data["url"]
+    output_format = DEFAULT_OUTPUT_FORMAT
+    backend = context.user_data.get("storage_backend", "local")
+    original_message_id = context.user_data.get("original_message_id")
+    
+    # Pass storage_manager to TaskData
+    data = TaskData(url, backend, selected_format, update, output_format, storage_manager, original_message_id)
+    task = DownloadTask(data)
+    task.downloadVideo()
+
+    return ConversationHandler.END
+
+
 def download_media(update, context):
     """
-    A stage downloading the selected media and converting it to the desired output format.
-    Afterwards the file will be uploaded to the specified storage backend.
+    A stage downloading the media and saving it to local storage.
+    """
+    logger.info("download()")
+    query = update.callback_query
+    selected_format = context.user_data[CALLBACK_SELECT_FORMAT]
+    url = context.user_data["url"]
+    output_format = query.data
+    backend = context.user_data.get("storage_backend", "local")
+    original_message_id = context.user_data.get("original_message_id")
+    
+    # Pass storage_manager to TaskData
+    data = TaskData(url, backend, selected_format, update, output_format, storage_manager, original_message_id)
+    task = DownloadTask(data)
+    task.downloadVideo()
+
+    return ConversationHandler.END
+
+
+def select_storage_backend(update, context):
+    """
+    A stage asking the user for the storage backend.
+    """
+    logger.info("select_storage_backend()")
+    
+    available_backends = storage_manager.get_available_backends()
+    
+    # If only one backend available, skip selection
+    if len(available_backends) == 1:
+        backend = list(available_backends.keys())[0]
+        context.user_data["storage_backend"] = backend
+        logger.info(f"Only one backend available, auto-selecting: {backend}")
+        return proceed_to_format_selection(update, context)
+    
+    # Build keyboard with available backends
+    button_list = []
+    for backend_id, backend_name in available_backends.items():
+        if backend_id == "local":
+            emoji = "💾"
+        else:
+            emoji = "☁️"
+        button_list.append(InlineKeyboardButton(
+            f"{emoji} {backend_name}", callback_data=f"storage_{backend_id}"))
+    
+    reply_markup = InlineKeyboardMarkup(build_menu(button_list, n_cols=1))
+    
+    url = context.user_data["url"]
+    update.message.reply_text(
+        f"🗂️ **Choose Storage Backend**\n\nWhere should I save the download from:\n`{url}`", 
+        reply_markup=reply_markup,
+        parse_mode='Markdown'
+    )
+    return STORAGE
+
+
+def handle_storage_selection(update, context):
+    """
+    Handle storage backend selection and proceed to format selection.
+    """
+    logger.info("handle_storage_selection()")
+    query = update.callback_query
+    query.answer()
+    
+    # Extract backend from callback data (format: "storage_backend_name")
+    backend = query.data.replace("storage_", "")
+    context.user_data["storage_backend"] = backend
+    
+    backend_name = storage_manager.get_backend_display_name(backend)
+    logger.info(f"User selected storage backend: {backend} ({backend_name})")
+    
+    # Delete the storage selection message immediately to clean up UI
+    try:
+        query.message.delete()
+    except Exception as e:
+        logger.warning(f"Could not delete storage selection message: {e}")
+    
+    # Go directly to format selection without intermediate message
+    return proceed_to_format_selection(update, context)
+
+
+def proceed_to_format_selection(update, context):
+    """
+    Proceed to format selection after storage backend is determined.
+    """
+    url = context.user_data["url"]
+    
+    # If DEFAULT_OUTPUT_FORMAT is set, start downloading immediately
+    if DEFAULT_OUTPUT_FORMAT:
+        logger.info(f"Auto-downloading with default format: {DEFAULT_OUTPUT_FORMAT}")
+        
+        # Start download immediately with best format and default output
+        backend = context.user_data.get("storage_backend", "local")
+        original_message_id = context.user_data.get("original_message_id")
+        data = TaskData(url, backend, CALLBACK_BEST_FORMAT, update, DEFAULT_OUTPUT_FORMAT, storage_manager, original_message_id)
+        task = DownloadTask(data)
+        task.downloadVideo()
+        return ConversationHandler.END
+    else:
+        # Show format selection for manual downloads
+        keyboard = [
+            [
+                InlineKeyboardButton(
+                    "Download Best Format", callback_data=CALLBACK_BEST_FORMAT),
+                InlineKeyboardButton(
+                    "Select Format", callback_data=CALLBACK_SELECT_FORMAT),
+            ]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        # Send new message or edit existing one
+        if hasattr(update, 'callback_query') and update.callback_query:
+            # We came from storage selection, edit the message
+            update.callback_query.edit_message_text(
+                f"Do you want me to download '{url}' ?", 
+                reply_markup=reply_markup
+            )
+        else:
+            # Direct entry, send new message
+            update.message.reply_text(
+                f"Do you want me to download '{url}' ?", 
+                reply_markup=reply_markup
+            )
+        return OUTPUT
+
+
+def get_backend_for_command(update, context, command_name):
+    """
+    Get the backend to use for ls/search commands.
+    Returns backend name or None if user needs to choose.
+    """
+    # Check if default backend is set
+    default_backend = storage_manager.get_default_backend()
+    if default_backend:
+        logger.info(f"{command_name} using default backend: {default_backend}")
+        return default_backend
+    
+    # Check if only one backend available
+    available_backends = storage_manager.get_available_backends()
+    if len(available_backends) == 1:
+        backend = list(available_backends.keys())[0]
+        logger.info(f"{command_name} using only available backend: {backend}")
+        return backend
+    
+    # Multiple backends available, need to ask user
+    return None
+
+
+def show_backend_selection_for_command(update, context, command_name, command_args=None):
+    """
+    Show backend selection for ls/search commands.
+    """
+    available_backends = storage_manager.get_available_backends()
+    
+    # Build keyboard with available backends
+    button_list = []
+    for backend_id, backend_name in available_backends.items():
+        if backend_id == "local":
+            emoji = "💾"
+        else:
+            emoji = "☁️"
+        
+        # Create callback data with command and args
+        callback_data = f"cmd_{command_name}_{backend_id}"
+        if command_args:
+            # For search, we'll store args in user_data
+            context.user_data[f"{command_name}_args"] = command_args
+        
+        button_list.append(InlineKeyboardButton(
+            f"{emoji} {backend_name}", callback_data=callback_data))
+    
+    reply_markup = InlineKeyboardMarkup(build_menu(button_list, n_cols=1))
+    
+    if command_name == "search" and command_args:
+        message_text = f"🔎 **Choose Backend for Search**\n\nSearch query: `{' '.join(command_args)}`\nWhich storage backend should I search?"
+    elif command_name == "storage":
+        message_text = f"📊 **Choose Backend for Storage Check**\n\nWhich storage backend should I check?"
+    else:
+        message_text = f"📁 **Choose Backend for {command_name.upper()}**\n\nWhich storage backend should I list?"
+    
+    update.message.reply_text(
+        message_text,
+        reply_markup=reply_markup,
+        parse_mode='Markdown'
+    )
+
+
+def handle_command_backend_selection(update, context):
+    """
+    Handle backend selection for ls/search commands.
     """
     query = update.callback_query
-    context.user_data["storage"] = query.data
-    logger.info("All settings: %s", context.user_data)
-
-    query.edit_message_text(text="Downloading..")
-    url = context.user_data["url"]
-    logger.info("Video URL to download: '%s'", url)
-    selected_format = context.user_data[CALLBACK_SELECT_FORMAT]
-
-    # some default configurations for video downloads
-    MP3_EXTENSION = 'mp3'
-    YOUTUBE_DL_OPTIONS = {
-        'format': selected_format,
-        'restrictfilenames': True,
-        'outtmpl': '%(title)s.%(ext)s',
-        'postprocessors': [{
-            'key': 'FFmpegExtractAudio',
-            'preferredcodec': MP3_EXTENSION,
-            'preferredquality': '192',
-        }],
-    }
-
-    with youtube_dl.YoutubeDL(YOUTUBE_DL_OPTIONS) as ydl:
-        result = ydl.extract_info("{}".format(url))
-        original_video_name = ydl.prepare_filename(result)
-
-    raw_media_name = os.path.splitext(original_video_name)[0]
-    final_media_name = "%s.%s" % (raw_media_name, MP3_EXTENSION)
-
-    # upload the file
-    backend_name = context.user_data["storage"]
-    backend = None
-    if backend_name == CALLBACK_GOOGLE_DRIVE:
-        backend = google_drive.GoogleDriveStorage()
-    elif backend_name == CALLBACK_OVERCAST:
-        raise NotImplementedError
-    else:
-        logger.error("Invalid backend '%s'", backend)
-
-    # upload the media file
-    query = update.callback_query
     query.answer()
-    query.edit_message_text(text="Uploading..")
-    logger.info("Uploading the file..")
-    backend.upload(final_media_name)
-    logger.info("Upload finished.")
+    
+    # Parse callback data: cmd_command_backend
+    parts = query.data.split('_')
+    if len(parts) != 3 or parts[0] != 'cmd':
+        query.edit_message_text("❌ Invalid command selection")
+        return
+    
+    command_name = parts[1]
+    backend = parts[2]
+    
+    backend_name = storage_manager.get_backend_display_name(backend)
+    logger.info(f"User selected backend {backend} for {command_name} command")
+    
+    # Delete the backend selection message immediately to clean up UI
+    try:
+        query.message.delete()
+    except Exception as e:
+        logger.warning(f"Could not delete backend selection message: {e}")
+    
+    # Execute the command with selected backend - use update instead of query since message was deleted
+    if command_name == "ls":
+        execute_ls_command(update, backend, backend_name)
+    elif command_name == "search":
+        # Get search args from user_data
+        search_args = context.user_data.get("search_args", [])
+        execute_search_command(update, backend, backend_name, search_args)
+        # Clean up
+        context.user_data.pop("search_args", None)
+    elif command_name == "storage":
+        execute_storage_command(update, backend, backend_name)
 
-    # finish conversation
-    query = update.callback_query
-    query.answer()
-    query.edit_message_text(text="Done!")
-    logger.info("Done!")
-    return ConversationHandler.END
+
+def execute_ls_command(update_or_query, backend, backend_name):
+    """
+    Execute ls command for a specific backend.
+    """
+    try:
+        storage_path = storage_manager.get_storage_path(backend)
+        media_files = get_media_files_from_path(storage_path, backend)
+        
+        if not media_files:
+            if backend == 'gdrive':
+                message = f"📁 No media files found in: {backend_name}\n☁️ Google Drive: `gdrive:youtube-downloads`"
+            else:
+                message = f"📁 No media files found in: {backend_name}\n📂 Path: `{storage_path}`"
+        else:
+            # Format and send the file list
+            title = f"📁 **{backend_name} Files** ({len(media_files)} files)"
+            chunks = format_file_list(media_files, title, backend)
+            message = chunks[0] if chunks else "📁 No files found"
+        
+        # Check if this is from a callback query (button) or direct command
+        if hasattr(update_or_query, 'callback_query') and update_or_query.callback_query:
+            # From button selection - try to edit, if that fails send new message
+            try:
+                update_or_query.callback_query.edit_message_text(message, parse_mode='Markdown')
+            except:
+                # Message was deleted, send new one
+                update_or_query.callback_query.message.reply_text(message, parse_mode='Markdown')
+        elif hasattr(update_or_query, 'edit_message_text'):
+            # This is a CallbackQuery object directly - try to edit, if that fails send new message
+            try:
+                update_or_query.edit_message_text(message, parse_mode='Markdown')
+            except:
+                # Message was deleted, get chat_id and send new message
+                chat_id = update_or_query.message.chat_id if hasattr(update_or_query, 'message') else update_or_query.from_user.id
+                import telegram
+                bot = telegram.Bot(os.getenv('BOT_TOKEN'))
+                bot.send_message(chat_id, message, parse_mode='Markdown')
+        else:
+            # From direct command - use reply_text
+            update_or_query.message.reply_text(message, parse_mode='Markdown')
+            
+    except Exception as e:
+        logger.error(f"Error in ls command for backend {backend}: {e}")
+        error_msg = f"❌ Error listing files from {backend_name}: {str(e)[:100]}"
+        
+        # Same logic for error messages
+        if hasattr(update_or_query, 'callback_query') and update_or_query.callback_query:
+            try:
+                update_or_query.callback_query.edit_message_text(error_msg)
+            except:
+                update_or_query.callback_query.message.reply_text(error_msg)
+        elif hasattr(update_or_query, 'edit_message_text'):
+            try:
+                update_or_query.edit_message_text(error_msg)
+            except:
+                chat_id = update_or_query.message.chat_id if hasattr(update_or_query, 'message') else update_or_query.from_user.id
+                import telegram
+                bot = telegram.Bot(os.getenv('BOT_TOKEN'))
+                bot.send_message(chat_id, error_msg)
+        else:
+            update_or_query.message.reply_text(error_msg)
+
+
+def execute_search_command(update_or_query, backend, backend_name, search_args):
+    """
+    Execute search command for a specific backend.
+    """
+    try:
+        search_query = ' '.join(search_args).strip()
+        if not search_query:
+            message = "🔎 No search query provided"
+        else:
+            search_query = sanitize_search_query(search_query)
+            storage_path = storage_manager.get_storage_path(backend)
+            all_media_files = get_media_files_from_path(storage_path, backend)
+            
+            # Filter files by search query (case-insensitive)
+            search_query_lower = search_query.lower()
+            matching_files = [
+                file_info for file_info in all_media_files 
+                if search_query_lower in file_info['name'].lower()
+            ]
+            
+            if not matching_files:
+                if backend == 'gdrive':
+                    location_info = "☁️ Google Drive: `gdrive:youtube-downloads`"
+                else:
+                    location_info = f"📂 Searched in: `{storage_path}`"
+                
+                message = (f"🔎 **No files found**\n\n"
+                          f"No files matching `{search_query}` found in {backend_name}.\n\n"
+                          f"{location_info}\n"
+                          f"📊 Total files in backend: {len(all_media_files)}")
+            else:
+                # Format the search results
+                title = f"🔎 **Search Results in {backend_name}**\n🔍 Query: `{search_query}`"
+                chunks = format_file_list(matching_files, title, backend)
+                message = chunks[0] if chunks else "🔎 No results found"
+        
+        # Check if this is from a callback query (button) or direct command
+        if hasattr(update_or_query, 'callback_query') and update_or_query.callback_query:
+            # From button selection - try to edit, if that fails send new message
+            try:
+                update_or_query.callback_query.edit_message_text(message, parse_mode='Markdown')
+            except:
+                # Message was deleted, send new one
+                update_or_query.callback_query.message.reply_text(message, parse_mode='Markdown')
+        elif hasattr(update_or_query, 'edit_message_text'):
+            # This is a CallbackQuery object directly - try to edit, if that fails send new message
+            try:
+                update_or_query.edit_message_text(message, parse_mode='Markdown')
+            except:
+                # Message was deleted, get chat_id and send new message
+                chat_id = update_or_query.message.chat_id if hasattr(update_or_query, 'message') else update_or_query.from_user.id
+                import telegram
+                bot = telegram.Bot(os.getenv('BOT_TOKEN'))
+                bot.send_message(chat_id, message, parse_mode='Markdown')
+        else:
+            # From direct command - use reply_text
+            update_or_query.message.reply_text(message, parse_mode='Markdown')
+            
+    except Exception as e:
+        logger.error(f"Error in search command for backend {backend}: {e}")
+        error_msg = f"❌ Error searching in {backend_name}: {str(e)[:100]}"
+        
+        # Same logic for error messages
+        if hasattr(update_or_query, 'callback_query') and update_or_query.callback_query:
+            try:
+                update_or_query.callback_query.edit_message_text(error_msg)
+            except:
+                update_or_query.callback_query.message.reply_text(error_msg)
+        elif hasattr(update_or_query, 'edit_message_text'):
+            try:
+                update_or_query.edit_message_text(error_msg)
+            except:
+                chat_id = update_or_query.message.chat_id if hasattr(update_or_query, 'message') else update_or_query.from_user.id
+                import telegram
+                bot = telegram.Bot(os.getenv('BOT_TOKEN'))
+                bot.send_message(chat_id, error_msg)
+        else:
+            update_or_query.message.reply_text(error_msg)
+
+
+def execute_storage_command(update_or_query, backend, backend_name):
+    """
+    Execute storage command for a specific backend.
+    """
+    try:
+        # Get storage monitor instance
+        storage_monitor = get_storage_monitor(BOT_TOKEN)
+        
+        # Send initial message - use same pattern as other execute functions
+        if hasattr(update_or_query, 'callback_query') and update_or_query.callback_query:
+            # From button selection - send new message
+            status_msg = update_or_query.callback_query.message.reply_text("🔍 Checking storage status...\n⏳ Remote backends may take a moment to respond.")
+        else:
+            # From direct command - use reply_text
+            status_msg = update_or_query.message.reply_text("🔍 Checking storage status...\n⏳ Remote backends may take a moment to respond.")
+        
+        if backend == 'local':
+            # For local storage, show directory size
+            try:
+                storage_path = storage_manager.ensure_storage_path(backend)
+                
+                # Calculate directory size
+                total_size = 0
+                file_count = 0
+                for dirpath, dirnames, filenames in os.walk(storage_path):
+                    for filename in filenames:
+                        filepath = os.path.join(dirpath, filename)
+                        try:
+                            total_size += os.path.getsize(filepath)
+                            file_count += 1
+                        except (OSError, IOError):
+                            pass
+                
+                # Format size
+                size_str = storage_monitor.format_storage_size(total_size)
+                
+                # Get filesystem status for local backend
+                filesystem_status = storage_monitor.get_storage_status(backend, storage_path)
+                if filesystem_status:
+                    storage_status = (
+                        f"{filesystem_status}\n"
+                        f"• Files in directory: {file_count}\n"
+                        f"• Directory size: {size_str}\n"
+                        f"• Path: {storage_path}"
+                    )
+                else:
+                    storage_status = (
+                        f"💾 **{backend_name}**\n"
+                        f"• Files: {file_count}\n"
+                        f"• Directory size: {size_str}\n"
+                        f"• Path: {storage_path}\n"
+                        f"• Filesystem: ❌ Unable to check"
+                    )
+                
+            except Exception as e:
+                storage_status = (
+                    f"💾 **{backend_name}**\n"
+                    f"• Status: ❌ Error checking local storage\n"
+                    f"• Error: {str(e)[:50]}..."
+                )
+        else:
+            # For cloud backends, use rclone to check storage
+            status = storage_monitor.get_storage_status(backend)
+            if status:
+                storage_status = status
+            else:
+                storage_status = (
+                    f"☁️ **{backend_name}**\n"
+                    f"• Status: ❌ Unable to check storage\n"
+                    f"• Check connection and configuration"
+                )
+        
+        # Create final message
+        final_message = f"📊 **{backend_name} Storage Status**\n\n{storage_status}"
+        
+        # Add threshold information
+        warning_gb = int(os.getenv('STORAGE_WARNING_THRESHOLD_GB', '1'))
+        final_message += f"\n\n⚙️ **Warning Threshold:** {warning_gb} GB"
+        
+        # Update the message with final status
+        status_msg.edit_text(final_message, parse_mode='Markdown')
+        
+    except Exception as e:
+        logger.error(f"Error in storage command for backend {backend}: {e}")
+        error_msg = f"❌ Error checking storage for {backend_name}: {str(e)[:100]}"
+        
+        # Same logic for error messages as other execute functions
+        if hasattr(update_or_query, 'callback_query') and update_or_query.callback_query:
+            try:
+                update_or_query.callback_query.edit_message_text(error_msg)
+            except:
+                update_or_query.callback_query.message.reply_text(error_msg)
+        elif hasattr(update_or_query, 'edit_message_text'):
+            try:
+                update_or_query.edit_message_text(error_msg)
+            except:
+                chat_id = update_or_query.message.chat_id if hasattr(update_or_query, 'message') else update_or_query.from_user.id
+                import telegram
+                bot = telegram.Bot(os.getenv('BOT_TOKEN'))
+                bot.send_message(chat_id, error_msg)
+        else:
+            update_or_query.message.reply_text(error_msg)
 
 
 def main():
     # Create the Updater and pass it your bot's token.
-    updater = Updater(token=BOT_TOKEN, use_context=True)
+    updater = Updater(BOT_TOKEN)
 
     # Get the dispatcher to register handlers
     dp = updater.dispatcher
 
-    # Setup conversation handler with the states FIRST and SECOND
-    # Use the pattern parameter to pass CallbackQueries with specific
-    # data pattern to the corresponding handlers.
-    # ^ means "start of line/string"
-    # $ means "end of line/string"
-    # So ^ABC$ will only allow 'ABC'
+    # Add conversation handler with storage selection
     conv_handler = ConversationHandler(
         entry_points=[MessageHandler(Filters.text & ~Filters.command, start)],
         states={
-
-            OUTPUT: [
-                CallbackQueryHandler(
-                    select_source_format, pattern="^%s$" % CALLBACK_SELECT_FORMAT),
-                CallbackQueryHandler(select_output_format),
-            ],
             STORAGE: [
-                CallbackQueryHandler(select_storage)
+                CallbackQueryHandler(handle_storage_selection, pattern='^storage_'),
+            ],
+            OUTPUT: [
+                CallbackQueryHandler(select_source_format, pattern='^' + CALLBACK_SELECT_FORMAT + '$'),
+                CallbackQueryHandler(select_output_format, pattern='^' + CALLBACK_BEST_FORMAT + '$'),
+                CallbackQueryHandler(select_output_format, pattern='^[0-9]+$'),
             ],
             DOWNLOAD: [
-                CallbackQueryHandler(download_media),
-            ]
+                CallbackQueryHandler(download_media, pattern='^' + CALLBACK_MP3 + '$'),
+                CallbackQueryHandler(download_media, pattern='^' + CALLBACK_MP4 + '$'),
+            ],
         },
-        allow_reentry=False,
-        per_user=True,
-        fallbacks=[CommandHandler('start', start)],
+        fallbacks=[CommandHandler('whoami', whoami)],
     )
 
-    # Add ConversationHandler to dispatcher that will be used for
-    # handling updates
+    # Add dedicated command handlers
+    dp.add_handler(CommandHandler('ls', ls_command))
+    dp.add_handler(CommandHandler('whoami', whoami))
+    dp.add_handler(CommandHandler('help', help_command))
+    dp.add_handler(CommandHandler('search', search_command))
+    dp.add_handler(CommandHandler('storage', storage_command))
+    dp.add_handler(CallbackQueryHandler(handle_command_backend_selection, pattern='^cmd_'))
     dp.add_handler(conv_handler)
-
-    # handle whoami command (with leading slash)
-    dp.add_handler(CommandHandler("whoami", whoami))
 
     # Start the Bot
     updater.start_polling()
 
     # Run the bot until you press Ctrl-C or the process receives SIGINT,
-    # SIGTERM or SIGABRT. This should be used most of the time, since
+    # SIGTERM or SIGABORT. This should be used most of the time, since
     # start_polling() is non-blocking and will stop the bot gracefully.
     updater.idle()
 

@@ -1,6 +1,34 @@
-version: '3.3'
 services:
     youtube-telegram-downloader:
         build: .
         env_file:
             - './bot.env'
+        environment:
+            - LOCAL_STORAGE_DIR=/home/bot/data
+            - DEFAULT_OUTPUT_FORMAT=mp3
+        volumes:
+            - ./data:/home/bot/data
+            - ./rclone-config:/home/bot/rclone-config:ro
+            - ./rclone-logs:/logs:ro
+        restart: unless-stopped
+
+    # Google Drive upload-only sync service
+    rclone-gdrive:
+        build:
+            context: .
+            dockerfile: Dockerfile.rclone
+        container_name: rclone-gdrive
+        profiles: ["gdrive"]
+        environment:
+            - RCLONE_REMOTE_NAME=gdrive
+            - RCLONE_REMOTE_PATH=youtube-downloads
+            - RCLONE_LOCAL_PATH=/data/gdrive
+            - RCLONE_LOG_FILE=/logs/rclone-upload.log
+            - RCLONE_CHECK_INTERVAL=1
+        volumes:
+            - ./data/gdrive:/data/gdrive
+            - ./rclone-config:/config:ro
+            - ./rclone-logs:/logs
+        restart: unless-stopped
+        depends_on:
+            - youtube-telegram-downloader

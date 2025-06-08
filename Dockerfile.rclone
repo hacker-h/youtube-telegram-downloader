@@ -1,0 +1,11 @@
+FROM rclone/rclone:latest
+
+# Install inotify-tools for real-time file monitoring
+RUN apk add --no-cache inotify-tools
+
+# Copy the upload script
+COPY scripts/rclone-sync.sh /usr/local/bin/rclone-sync.sh
+RUN chmod +x /usr/local/bin/rclone-sync.sh
+
+# Set the entrypoint to our upload script
+ENTRYPOINT ["/usr/local/bin/rclone-sync.sh"] 

@@ -1,20 +1,39 @@
-FROM python:3.9-alpine3.12 as builder
+FROM python:3.9-slim
 
-COPY ./requirements.txt /tmp/requirements.txt
-RUN apk add ffmpeg gcc libffi-dev libressl-dev musl-dev &&\
-    pip3 install --no-warn-script-location --user -r /tmp/requirements.txt &&\
-    adduser -S bot -s /bin/nologin -u 1000 &&\
-    chown -R 1000 /root/.local
+# Install system dependencies including rclone
+RUN apt-get update && apt-get install -y \
+    ffmpeg \
+    gcc \
+    libffi-dev \
+    curl \
+    unzip \
+    && curl https://rclone.org/install.sh | bash \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
 
-FROM python:3.9-alpine3.12 as runner
+# Create user early
+RUN useradd -m -s /bin/bash bot
 
-RUN apk add --no-cache ffmpeg && \
-    adduser -S bot  -s /bin/nologin -u 1000
-USER 1000
+# Set working directory
+WORKDIR /home/bot
 
-COPY ./bot.py /home/bot/bot.py
-COPY ./backends/ /home/bot/backends/
-COPY --from=builder /root/.local /home/bot/.local
+# Copy only requirements first for better caching
+COPY ./requirements.txt ./
 
-WORKDIR /home/bot/
-CMD python3 ./bot.py
+# Install Python dependencies (this layer will be cached unless requirements.txt changes)
+RUN pip3 install --no-cache-dir --no-warn-script-location -r requirements.txt
+
+# Copy application code (this layer will rebuild on code changes, but deps won't)
+COPY ./bot.py ./
+COPY ./task.py ./
+COPY ./telegram_progress.py ./
+COPY ./backends/ ./backends/
+
+# Set ownership of files to bot user
+RUN chown -R bot:bot /home/bot
+
+# Switch to bot user
+USER bot
+
+# Run the application
+CMD ["python3", "./bot.py"]
