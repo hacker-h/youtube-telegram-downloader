@@ -136,107 +136,22 @@ def ls_command(update, context):
 
 
 def storage_command(update, context):
-    """Show storage status for all configured backends"""
+    """Show storage status for selected backend"""
     user = update.message.from_user
     if not is_trusted(user.id):
         logger.info("Ignoring storage request from untrusted user '%s' with id '%s'", user.first_name, user.id)
         return
     
-    try:
-        # Get storage monitor instance
-        storage_monitor = get_storage_monitor(BOT_TOKEN)
-        
-        # Send initial message
-        status_msg = update.message.reply_text("🔍 Checking storage status...")
-        
-        # Get all available backends
-        available_backends = storage_manager.get_available_backends()
-        
-        if not available_backends:
-            status_msg.edit_text("❌ No storage backends configured!")
-            return
-        
-        # Check storage for each backend
-        storage_statuses = []
-        
-        for backend in available_backends:
-            backend_name = storage_manager.get_backend_display_name(backend)
-            
-            if backend == 'local':
-                # For local storage, show directory size
-                try:
-                    storage_path = storage_manager.ensure_storage_path(backend)
-                    
-                    # Calculate directory size
-                    total_size = 0
-                    file_count = 0
-                    for dirpath, dirnames, filenames in os.walk(storage_path):
-                        for filename in filenames:
-                            filepath = os.path.join(dirpath, filename)
-                            try:
-                                total_size += os.path.getsize(filepath)
-                                file_count += 1
-                            except (OSError, IOError):
-                                pass
-                    
-                    # Format size
-                    size_str = storage_monitor.format_storage_size(total_size)
-                    
-                    # Get filesystem status for local backend
-                    filesystem_status = storage_monitor.get_storage_status(backend, storage_path)
-                    if filesystem_status:
-                        storage_statuses.append(
-                            f"{filesystem_status}\n"
-                            f"• Files in directory: {file_count}\n"
-                            f"• Directory size: {size_str}\n"
-                            f"• Path: {storage_path}"
-                        )
-                    else:
-                        storage_statuses.append(
-                            f"💾 **{backend_name}**\n"
-                            f"• Files: {file_count}\n"
-                            f"• Directory size: {size_str}\n"
-                            f"• Path: {storage_path}\n"
-                            f"• Filesystem: ❌ Unable to check"
-                        )
-                    
-                except Exception as e:
-                    storage_statuses.append(
-                        f"💾 **{backend_name}**\n"
-                        f"• Status: ❌ Error checking local storage\n"
-                        f"• Error: {str(e)[:50]}..."
-                    )
-            else:
-                # For cloud backends, use rclone to check storage
-                status = storage_monitor.get_storage_status(backend)
-                if status:
-                    storage_statuses.append(status)
-                else:
-                    storage_statuses.append(
-                        f"☁️ **{backend_name}**\n"
-                        f"• Status: ❌ Unable to check storage\n"
-                        f"• Check connection and configuration"
-                    )
-        
-        # Combine all statuses
-        if storage_statuses:
-            final_message = "📊 **Storage Status Report**\n\n" + "\n\n".join(storage_statuses)
-            
-            # Add threshold information
-            warning_gb = int(os.getenv('STORAGE_WARNING_THRESHOLD_GB', '1'))
-            
-            final_message += f"\n\n⚙️ **Warning Thresholds:**\n"
-            final_message += f"• Warning: {warning_gb} GB"
-            
-        else:
-            final_message = "❌ No storage information available"
-        
-        # Update the message with final status
-        status_msg.edit_text(final_message, parse_mode='Markdown')
-        
-    except Exception as e:
-        logger.error(f"Error in storage command: {e}")
-        update.message.reply_text(f"❌ Error checking storage status:\n{str(e)[:100]}...")
+    # Check if we should ask for backend selection
+    backend = get_backend_for_command(update, context, "storage")
+    if backend is None:
+        # Multiple backends available, ask user to choose
+        show_backend_selection_for_command(update, context, "storage")
+        return
+    
+    # Execute storage command with determined backend
+    backend_name = storage_manager.get_backend_display_name(backend)
+    execute_storage_command(update, backend, backend_name)
 
 
 def help_command(update, context):
@@ -750,7 +665,7 @@ def handle_storage_selection(update, context):
     
     # Delete the storage selection message immediately to clean up UI
     try:
-        query.delete_message()
+        query.message.delete()
     except Exception as e:
         logger.warning(f"Could not delete storage selection message: {e}")
     
@@ -852,6 +767,8 @@ def show_backend_selection_for_command(update, context, command_name, command_ar
     
     if command_name == "search" and command_args:
         message_text = f"🔎 **Choose Backend for Search**\n\nSearch query: `{' '.join(command_args)}`\nWhich storage backend should I search?"
+    elif command_name == "storage":
+        message_text = f"📊 **Choose Backend for Storage Check**\n\nWhich storage backend should I check?"
     else:
         message_text = f"📁 **Choose Backend for {command_name.upper()}**\n\nWhich storage backend should I list?"
     
@@ -883,7 +800,7 @@ def handle_command_backend_selection(update, context):
     
     # Delete the backend selection message immediately to clean up UI
     try:
-        query.delete_message()
+        query.message.delete()
     except Exception as e:
         logger.warning(f"Could not delete backend selection message: {e}")
     
@@ -896,6 +813,8 @@ def handle_command_backend_selection(update, context):
         execute_search_command(update, backend, backend_name, search_args)
         # Clean up
         context.user_data.pop("search_args", None)
+    elif command_name == "storage":
+        execute_storage_command(update, backend, backend_name)
 
 
 def execute_ls_command(update_or_query, backend, backend_name):
@@ -1024,6 +943,110 @@ def execute_search_command(update_or_query, backend, backend_name, search_args):
         error_msg = f"❌ Error searching in {backend_name}: {str(e)[:100]}"
         
         # Same logic for error messages
+        if hasattr(update_or_query, 'callback_query') and update_or_query.callback_query:
+            try:
+                update_or_query.callback_query.edit_message_text(error_msg)
+            except:
+                update_or_query.callback_query.message.reply_text(error_msg)
+        elif hasattr(update_or_query, 'edit_message_text'):
+            try:
+                update_or_query.edit_message_text(error_msg)
+            except:
+                chat_id = update_or_query.message.chat_id if hasattr(update_or_query, 'message') else update_or_query.from_user.id
+                import telegram
+                bot = telegram.Bot(os.getenv('BOT_TOKEN'))
+                bot.send_message(chat_id, error_msg)
+        else:
+            update_or_query.message.reply_text(error_msg)
+
+
+def execute_storage_command(update_or_query, backend, backend_name):
+    """
+    Execute storage command for a specific backend.
+    """
+    try:
+        # Get storage monitor instance
+        storage_monitor = get_storage_monitor(BOT_TOKEN)
+        
+        # Send initial message - use same pattern as other execute functions
+        if hasattr(update_or_query, 'callback_query') and update_or_query.callback_query:
+            # From button selection - send new message
+            status_msg = update_or_query.callback_query.message.reply_text("🔍 Checking storage status...\n⏳ Remote backends may take a moment to respond.")
+        else:
+            # From direct command - use reply_text
+            status_msg = update_or_query.message.reply_text("🔍 Checking storage status...\n⏳ Remote backends may take a moment to respond.")
+        
+        if backend == 'local':
+            # For local storage, show directory size
+            try:
+                storage_path = storage_manager.ensure_storage_path(backend)
+                
+                # Calculate directory size
+                total_size = 0
+                file_count = 0
+                for dirpath, dirnames, filenames in os.walk(storage_path):
+                    for filename in filenames:
+                        filepath = os.path.join(dirpath, filename)
+                        try:
+                            total_size += os.path.getsize(filepath)
+                            file_count += 1
+                        except (OSError, IOError):
+                            pass
+                
+                # Format size
+                size_str = storage_monitor.format_storage_size(total_size)
+                
+                # Get filesystem status for local backend
+                filesystem_status = storage_monitor.get_storage_status(backend, storage_path)
+                if filesystem_status:
+                    storage_status = (
+                        f"{filesystem_status}\n"
+                        f"• Files in directory: {file_count}\n"
+                        f"• Directory size: {size_str}\n"
+                        f"• Path: {storage_path}"
+                    )
+                else:
+                    storage_status = (
+                        f"💾 **{backend_name}**\n"
+                        f"• Files: {file_count}\n"
+                        f"• Directory size: {size_str}\n"
+                        f"• Path: {storage_path}\n"
+                        f"• Filesystem: ❌ Unable to check"
+                    )
+                
+            except Exception as e:
+                storage_status = (
+                    f"💾 **{backend_name}**\n"
+                    f"• Status: ❌ Error checking local storage\n"
+                    f"• Error: {str(e)[:50]}..."
+                )
+        else:
+            # For cloud backends, use rclone to check storage
+            status = storage_monitor.get_storage_status(backend)
+            if status:
+                storage_status = status
+            else:
+                storage_status = (
+                    f"☁️ **{backend_name}**\n"
+                    f"• Status: ❌ Unable to check storage\n"
+                    f"• Check connection and configuration"
+                )
+        
+        # Create final message
+        final_message = f"📊 **{backend_name} Storage Status**\n\n{storage_status}"
+        
+        # Add threshold information
+        warning_gb = int(os.getenv('STORAGE_WARNING_THRESHOLD_GB', '1'))
+        final_message += f"\n\n⚙️ **Warning Threshold:** {warning_gb} GB"
+        
+        # Update the message with final status
+        status_msg.edit_text(final_message, parse_mode='Markdown')
+        
+    except Exception as e:
+        logger.error(f"Error in storage command for backend {backend}: {e}")
+        error_msg = f"❌ Error checking storage for {backend_name}: {str(e)[:100]}"
+        
+        # Same logic for error messages as other execute functions
         if hasattr(update_or_query, 'callback_query') and update_or_query.callback_query:
             try:
                 update_or_query.callback_query.edit_message_text(error_msg)

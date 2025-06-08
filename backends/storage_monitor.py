@@ -34,13 +34,10 @@ class StorageMonitor:
             Dict with 'total', 'used', 'free' in bytes, or None if check failed
         """
         try:
-            # Run rclone about command to get storage info
+            # Use local rclone binary instead of Docker
             cmd = [
-                'docker', 'run', '--rm',
-                '-v', f'{os.path.dirname(self.rclone_config_path)}:/config',
-                'rclone/rclone:latest',
-                'about', f'{backend}:',
-                '--config', '/config/rclone.conf',
+                'rclone', 'about', f'{backend}:',
+                '--config', self.rclone_config_path,
                 '--json'
             ]
             

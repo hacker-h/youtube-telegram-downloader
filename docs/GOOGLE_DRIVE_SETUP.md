@@ -1,43 +1,43 @@
-# 🌐 Google Drive API Setup für rclone
+# 🌐 Google Drive API Setup for rclone
 
-Vollständige Anleitung zur Einrichtung von Google Drive mit rclone für automatische Cloud-Synchronisation.
+Complete guide for setting up Google Drive with rclone for automatic cloud synchronization.
 
-## 📋 Übersicht
+## 📋 Overview
 
-Diese Anleitung führt dich durch:
-1. **Google Cloud Console Setup** - API aktivieren und OAuth konfigurieren
-2. **rclone Konfiguration** - Verbindung zu Google Drive herstellen
-3. **Docker Integration** - Automatische Synchronisation einrichten
+This guide will walk you through:
+1. **Google Cloud Console Setup** - Enable API and configure OAuth
+2. **rclone Configuration** - Establish connection to Google Drive
+3. **Docker Integration** - Set up automatic synchronization
 
-## 🚀 Teil 1: Google Cloud Console Setup
+## 🚀 Part 1: Google Cloud Console Setup
 
-### 1.1 Google Cloud Projekt erstellen
+### 1.1 Create Google Cloud Project
 
-1. Öffne [Google Cloud Console](https://console.cloud.google.com/)
-2. **Neues Projekt erstellen** oder bestehendes auswählen
-3. Projektname: z.B. `YtTelegrmDownloaderProject`
+1. Open [Google Cloud Console](https://console.cloud.google.com/)
+2. **Create new project** or select existing one
+3. Project name: e.g., `YtTelegrmDownloaderProject`
 
-### 1.2 Google Drive API aktivieren
+### 1.2 Enable Google Drive API
 
 1. **APIs & Services** → **Library**
-2. Suche nach **"Google Drive API"**
-3. **Google Drive API** auswählen
-4. **Enable** klicken
+2. Search for **"Google Drive API"**
+3. Select **Google Drive API**
+4. Click **Enable**
 
-### 1.3 OAuth Consent Screen konfigurieren
+### 1.3 Configure OAuth Consent Screen
 
 1. **APIs & Services** → **OAuth consent screen**
-2. **External** auswählen (für persönliche Nutzung)
-3. **App Information** ausfüllen:
+2. Select **External** (for personal use)
+3. Fill out **App Information**:
    - App name: `YtTelegrmDownloaderProjectApp`
-   - User support email: Deine E-Mail
-   - Developer contact: Deine E-Mail
+   - User support email: Your email
+   - Developer contact: Your email
 4. **Save and Continue**
 
-### 1.4 Scopes hinzufügen
+### 1.4 Add Scopes
 
 1. **Scopes** → **Add or Remove Scopes**
-2. **Manually add scopes** → Folgende URL eingeben:
+2. **Manually add scopes** → Enter the following URL:
    ```
    https://www.googleapis.com/auth/drive.file
    ```
@@ -46,86 +46,78 @@ Diese Anleitung führt dich durch:
 
 ### 1.5 Test Users (Optional)
 
-**Option A: Test User hinzufügen**
+**Option A: Add Test User**
 1. **Test users** → **Add users**
-2. Deine E-Mail hinzufügen
+2. Add your email
 3. **Save**
 
-**Option B: App veröffentlichen**
+**Option B: Publish App**
 1. **Publishing status** → **Publish App**
-2. **Confirm** (keine Google-Verification nötig für persönliche Nutzung)
+2. **Confirm** (no Google verification needed for personal use)
 
-### 1.6 OAuth Credentials erstellen
+### 1.6 Create OAuth Credentials
 
 1. **APIs & Services** → **Credentials**
 2. **Create Credentials** → **OAuth 2.0 Client IDs**
 3. **Application type**: `Desktop application`
 4. **Name**: `youtube-telegram-downloader`
 5. **Create**
-6. **Download JSON** (optional, rclone nutzt Standard-Credentials)
+6. **Download JSON** (optional, rclone uses default credentials)
 
-## 🔧 Teil 2: rclone Konfiguration
+## 🔧 Part 2: rclone Configuration
 
-### 2.1 Automatisches Setup (Empfohlen)
+### 2.1 Interactive rclone setup
 
 ```bash
-# Interaktives Setup-Script ausführen
+# Run interactive setup script
 ./setup-rclone.sh
 ```
 
-### 2.2 Manuelles Setup
-
-```bash
-# rclone Container mit Host-Netzwerk für OAuth
-docker run -it --rm \
-  --network host \
-  -v $(pwd)/rclone-config:/config \
-  rclone/rclone:latest \
-  config --config /config/rclone.conf
-```
-
-### 2.3 rclone Konfiguration Schritte
+### 2.2 rclone Configuration Steps
 
 1. **New remote**: `n`
-2. **Name**: `gdrive`
+2. **Name**: `gdrive` (or any name you prefer)
 3. **Storage**: `15` (Google Drive)
-4. **Client ID**: Enter (Standard verwenden)
-5. **Client Secret**: Enter (Standard verwenden)
-6. **Scope**: `3` (drive.file - Zugriff nur auf von rclone erstellte Dateien)
-7. **Root folder**: Enter (Standard)
-8. **Service account**: Enter (Standard)
-9. **Auto config**: `Y` (Browser-OAuth)
+4. **Client ID**: Enter (use default)
+5. **Client Secret**: Enter (use default)
+6. **Scope**: `3` (drive.file - access only to files created by rclone)
+7. **Root folder**: Enter (default)
+8. **Service account**: Enter (default)
+9. **Auto config**: `Y` (browser OAuth)
 10. **Team drive**: `n`
 11. **Confirm**: `y`
 12. **Quit**: `q`
 
-### 2.4 OAuth Browser-Flow
+### 2.3 OAuth Browser Flow
 
-1. **Browser öffnet sich automatisch** (dank `--network host`)
-2. **Google Account auswählen**
-3. **App-Berechtigung erteilen**:
-   - "YtTelegrmDownloaderProjectApp möchte auf dein Google-Konto zugreifen"
-   - **"Erlauben"** klicken
-4. **Erfolg**: "The authentication flow has completed."
+1. **rclone displays OAuth URL** - Copy the URL from the terminal output
+2. **Open browser manually** and navigate to the OAuth URL (port available on localhost thanks to `--network host`)
+3. **Select Google Account**
+4. **Grant app permission**:
+   - "YtTelegrmDownloaderProjectApp wants to access your Google Account"
+   - Click **"Allow"**
+5. **Success**: "The authentication flow has completed."
 
-## 🧪 Teil 3: Konfiguration testen
+## 🧪 Part 3: Test Configuration
 
-### 3.1 Automatischer Test
+When the container is setup properly it should automatically upload and (locally) delete all files it detects in its data volume.
+
+### 3.1 Automatic Test
 
 ```bash
-# Test-Script ausführen
+# Run test script
 ./test-rclone.sh
 ```
 
-### 3.2 Manueller Test
+### 3.2 Manual Test
 
 ```bash
-# Verbindung testen
+# Test connection
 docker run --rm -v $(pwd)/rclone-config:/config \
   rclone/rclone:latest \
   lsd gdrive: --config /config/rclone.conf
 
-# Test-Datei hochladen
+# Upload test file
 echo "Test" > data/gdrive/test.txt
 docker run --rm \
   -v $(pwd)/rclone-config:/config \
@@ -135,122 +127,75 @@ docker run --rm \
   --config /config/rclone.conf
 ```
 
-## 🐳 Teil 4: Docker Integration
+## 🐳 Part 4: Docker Integration
 
-### 4.1 Bot mit Google Drive starten
+### 4.1 Start Bot with Google Drive
 
 ```bash
-# Bot + rclone Google Drive Container
+# Bot + rclone Google Drive container
 docker compose --profile gdrive up -d
 ```
 
-### 4.2 Status prüfen
+### 4.2 Check Status
 
 ```bash
-# Container Status
+# Container status
 docker compose ps
 
-# rclone Logs
+# rclone logs
 docker compose logs rclone-gdrive
 
-# Sync-Status
+# Sync status
 docker compose logs rclone-gdrive --tail=10
 ```
 
+
+
 ## 🔧 Troubleshooting
 
-### Problem: "Zugriff blockiert" / "access_denied"
+### Problem: "Access blocked" / "access_denied"
 
-**Ursache**: OAuth Consent Screen nicht korrekt konfiguriert
+**Cause**: OAuth Consent Screen not configured correctly
 
-**Lösung**:
-1. **Scopes prüfen**: `https://www.googleapis.com/auth/drive.file` muss hinzugefügt sein
-2. **Test User hinzufügen** oder **App veröffentlichen**
-3. **Browser-Cache leeren** und OAuth erneut versuchen
+**Solution**:
+1. **Check scopes**: `https://www.googleapis.com/auth/drive.file` must be added
+2. **Add test user** or **publish app**
+3. **Clear browser cache** and retry OAuth
 
-### Problem: "network not found" beim Docker Start
+### Problem: "network not found" on Docker start
 
-**Ursache**: Docker-Netzwerk Probleme
+**Cause**: Docker network issues
 
-**Lösung**:
+**Solution**:
 ```bash
 docker compose down
 docker system prune -f
 docker compose --profile gdrive up -d
 ```
 
-### Problem: Browser öffnet sich nicht
+### Problem: Browser doesn't open
 
-**Ursache**: `--network host` fehlt bei rclone config
-
-**Lösung**:
-```bash
-# Setup-Script nutzen (hat --network host)
-./setup-rclone.sh
-
-# Oder manuell mit --network host
-docker run -it --rm --network host \
-  -v $(pwd)/rclone-config:/config \
-  rclone/rclone:latest \
-  config --config /config/rclone.conf
+**Cause**: rclone is running within a container without a browser, therefore it cannot open your browser, however by sharing the host network namespace (make sure to use --network host) you will be able to access the exposed port locally by copying the logged URL into your browser e.g. http://localhost:31823
 ```
 
-### Problem: "Remote not found"
+## 📁 File Structure
 
-**Ursache**: Remote-Name stimmt nicht überein
-
-**Lösung**:
-```bash
-# Verfügbare Remotes prüfen
-docker run --rm -v $(pwd)/rclone-config:/config \
-  rclone/rclone:latest \
-  listremotes --config /config/rclone.conf
-
-# Remote muss "gdrive:" heißen
-```
-
-## 📁 Dateistruktur
-
-Nach erfolgreichem Setup:
+After successful setup:
 
 ```
 youtube-telegram-downloader/
 ├── rclone-config/
-│   └── rclone.conf          # OAuth-Token und Konfiguration
+│   └── rclone.conf          # OAuth token and configuration
 ├── data/
-│   └── gdrive/              # Lokale Dateien für Google Drive Sync
+│   └── gdrive/              # Local files for Google Drive sync
 ├── rclone-logs/
-│   └── sync.log             # Sync-Protokoll
-├── setup-rclone.sh          # Automatisches Setup-Script
-└── test-rclone.sh           # Test-Script
-```
+│   └── sync.log             # Sync log
+├── setup-rclone.sh          # Automatic setup script
+└── test-rclone.sh           # Test script
+```  
 
-## 🔒 Sicherheit
-
-### OAuth Scope `drive.file`
-
-- ✅ **Sicher**: Zugriff nur auf von rclone erstellte Dateien
-- ✅ **Sichtbar**: Dateien erscheinen normal in Google Drive
-- ✅ **Widerrufbar**: Berechtigung kann jederzeit entzogen werden
-- ❌ **Kein Zugriff** auf bestehende Google Drive Dateien
-
-### Token-Verwaltung
-
-- **Automatische Erneuerung**: rclone erneuert OAuth-Token automatisch
-- **Sichere Speicherung**: Token in `rclone-config/rclone.conf`
-- **Berechtigung entziehen**: [Google Account Permissions](https://myaccount.google.com/permissions)
-
-## 🎯 Ergebnis
-
-Nach erfolgreichem Setup:
-
-1. **Bot speichert Downloads** in `data/gdrive/`
-2. **rclone synct automatisch** alle 5 Minuten zu Google Drive
-3. **Dateien erscheinen** in Google Drive unter `/youtube-downloads`
-4. **Vollautomatisch** - keine weitere Interaktion nötig
-
-## 📚 Weiterführende Links
+## 📚 Further Links
 
 - [Google Cloud Console](https://console.cloud.google.com/)
-- [rclone Google Drive Dokumentation](https://rclone.org/drive/)
-- [OAuth 2.0 Scopes für Google APIs](https://developers.google.com/identity/protocols/oauth2/scopes#drive) 
+- [rclone Google Drive Documentation](https://rclone.org/drive/)
+- [OAuth 2.0 Scopes for Google APIs](https://developers.google.com/identity/protocols/oauth2/scopes#drive) 
