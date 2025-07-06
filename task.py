@@ -361,8 +361,16 @@ class CustomProgressTracker:
         """Update progress with percentage and optional file size info"""
         current_time = time.time()
         
-        # Only update if percentage changed by at least 5% or 2 seconds passed
-        if abs(percent - self.last_percent) >= 5 or (current_time - self.last_update_time) >= 2:
+        # Dynamically tune update frequency – less chat spam for huge files
+        if total_bytes and not self.total_size:
+            self.total_size = total_bytes
+
+        large_file = self.total_size and self.total_size > 50 * 1024 * 1024  # 50 MB
+        percent_threshold = 10 if large_file else 5
+        time_threshold = 4 if large_file else 2
+
+        # Update message only if thresholds exceeded
+        if abs(percent - self.last_percent) >= percent_threshold or (current_time - self.last_update_time) >= time_threshold:
             try:
                 if downloaded_bytes and total_bytes:
                     downloaded_mb = downloaded_bytes / (1024 * 1024)

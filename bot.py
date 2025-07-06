@@ -16,6 +16,7 @@ from hurry.filesize import size
 from task import TaskData, DownloadTask
 from backends.storage_manager import StorageManager
 from backends.storage_monitor import get_storage_monitor
+from utils.cache import cache
 import subprocess
 
 # Enable logging
@@ -199,11 +200,17 @@ def sanitize_search_query(query):
     return safe_query.strip()
 
 
-def get_media_files_from_gdrive():
+def get_media_files_from_gdrive(force_refresh: bool = False):
     """
     Get all media files from Google Drive using rclone.
     Returns list of file info dictionaries.
     """
+    # Return cached copy if available and not forcing refresh
+    if not force_refresh:
+        cached = cache.get("gdrive_files")
+        if cached is not None:
+            return cached
+
     try:
         # Use rclone directly instead of docker run
         # The rclone config should be mounted at /home/bot/rclone-config/rclone.conf
@@ -253,6 +260,8 @@ def get_media_files_from_gdrive():
         media_files.sort(key=lambda x: x['name'].lower())
         
         logger.info(f"Found {len(media_files)} media files in Google Drive")
+        # Cache for 5 minutes
+        cache.set("gdrive_files", media_files, ttl=300)
         return media_files
         
     except subprocess.TimeoutExpired:
@@ -271,6 +280,12 @@ def get_media_files_from_path(storage_path, backend=None):
     # For Google Drive backend, use rclone to list files
     if backend == 'gdrive':
         return get_media_files_from_gdrive()
+    
+    # Try cache first (30 s TTL)
+    cache_key = f"path_{backend or 'local'}_{storage_path}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
     
     # For local storage, use filesystem
     try:
@@ -301,6 +316,8 @@ def get_media_files_from_path(storage_path, backend=None):
         # Sort alphabetically by filename
         media_files.sort(key=lambda x: x['name'].lower())
         
+        # Cache directory listing short-term
+        cache.set(cache_key, media_files, ttl=30)
         return media_files
     except Exception as e:
         logger.error(f"Error getting media files from {storage_path}: {e}")
@@ -1132,3 +1149,26 @@ def main():
 
 if __name__ == '__main__':
     main()
+
+# ---------------------------------------------------------------------------
+# Background refresher for Google Drive cache
+# ---------------------------------------------------------------------------
+
+
+def _start_gdrive_cache_refresher(interval: int = 300):
+    """Refresh Google Drive listing in background every *interval* seconds."""
+    import threading, time
+
+    def _worker():
+        while True:
+            try:
+                get_media_files_from_gdrive(force_refresh=True)
+            except Exception as exc:  # pragma: no cover
+                logger.warning("GDrive cache refresh failed: %s", exc)
+            time.sleep(interval)
+
+    threading.Thread(target=_worker, daemon=True, name="gdrive-cache-refresher").start()
+
+
+# Kick off background refresher at import time
+_start_gdrive_cache_refresher()
