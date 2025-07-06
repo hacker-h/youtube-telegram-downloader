@@ -12,7 +12,6 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import CallbackQueryHandler, ConversationHandler, CommandHandler, Filters, MessageHandler, Updater
 import logging
 import os
-import yt_dlp
 from hurry.filesize import size
 from task import TaskData, DownloadTask
 from backends.storage_manager import StorageManager
@@ -533,6 +532,8 @@ def select_source_format(update, context):
     logger.info("select_format")
     query = update.callback_query
     query.answer()
+    # Local import to avoid heavy module loading at startup
+    import yt_dlp
     # get formats
     url = context.user_data["url"]
     ydl_opts = {}

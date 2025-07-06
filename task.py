@@ -5,7 +5,6 @@ import telegram
 from telegram.ext import CallbackQueryHandler, ConversationHandler, CommandHandler, Filters, MessageHandler, Updater
 import logging
 import os
-import yt_dlp
 from hurry.filesize import size
 from dotenv import load_dotenv
 import time
@@ -78,6 +77,9 @@ class DownloadTask:
         and save it to the configured storage backend.
         """
         try:
+            # Local import to defer loading heavy module until needed
+            import yt_dlp
+
             # Send progress message with unique session identifier
             session_id = get_next_session_id()
             progress_msg = self.bot.send_message(self.chat_id, f"🔄 Starting download... {session_id}")
