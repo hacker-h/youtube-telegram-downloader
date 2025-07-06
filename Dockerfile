@@ -1,13 +1,12 @@
 FROM python:3.9-slim
 
 # Install system dependencies including rclone
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
-    gcc \
-    libffi-dev \
     curl \
     unzip \
-    && curl https://rclone.org/install.sh | bash \
+    && curl -s https://rclone.org/install.sh | bash \
+    && apt-get autoremove -y \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 

@@ -1,11 +1,5 @@
-APScheduler
-bs4
-certifi
-chardet
 hurry.filesize
 python-dotenv
 python-telegram-bot==13.0
-PyYAML
-requests
 tqdm
 yt-dlp

@@ -1,16 +1,12 @@
 # tasks.py
 
 import sys
-import requests
-
 import telegram
-from telegram import update
 from telegram.ext import CallbackQueryHandler, ConversationHandler, CommandHandler, Filters, MessageHandler, Updater
 import logging
 import os
 import yt_dlp
 from hurry.filesize import size
-import telegram
 from dotenv import load_dotenv
 import time
 from backends.upload_progress import upload_progress_manager
